@@ -11,9 +11,12 @@ from __future__ import annotations
 
 from ..types import SourceTier
 from ._base import SourceAdapter
+from .pubmed import ADAPTER as _PUBMED
 
-# Реестр адаптеров. Ключ — SourceTier, значение — экземпляр адаптера.
-# P0 пустой; в P1 появится `ADAPTERS["pubmed"] = PubMedAdapter()` и т.д.
-ADAPTERS: dict[SourceTier, SourceAdapter] = {}
+# Реестр адаптеров. Ключ — SourceTier (та же категория, что в ClaimQueries),
+# значение — экземпляр адаптера. Retriever зовёт по этому реестру.
+ADAPTERS: dict[SourceTier, SourceAdapter] = {
+    "pubmed": _PUBMED,
+}
 
 __all__ = ["SourceAdapter", "ADAPTERS"]

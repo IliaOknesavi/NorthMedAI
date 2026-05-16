@@ -96,9 +96,77 @@ def _patch_qa_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pipeline_mod, "qa_pass", fake_qa)
 
 
+def _patch_query_former_naive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Заменить query_former на наивный (текст claim'а → pubmed запрос), без LLM."""
+
+    async def fake_batch(claims):
+        from agents.query_former import _fallback_queries
+        return [_fallback_queries(c) for c in claims]
+
+    from agents import pipeline as pipeline_mod
+    monkeypatch.setattr(pipeline_mod, "make_queries_batch", fake_batch)
+
+
+def _patch_retriever_one_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Заменить retrieve на возврат 1 mock-source (как P0 stub). Без сети."""
+
+    async def fake_retrieve(claim_queries):
+        from datetime import datetime, timezone
+        from urllib.parse import quote_plus
+        q = quote_plus(claim_queries["claim_text"][:120])
+        return {
+            "claim_text": claim_queries["claim_text"],
+            "sources": [{
+                "title": "PubMed (mock)",
+                "url": f"https://pubmed.ncbi.nlm.nih.gov/?term={q}",
+                "tier": "pubmed",
+                "weight": 0.9,
+                "mock": True,
+            }],
+            "errors": [],
+            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    from agents import pipeline as pipeline_mod
+    monkeypatch.setattr(pipeline_mod, "retrieve", fake_retrieve)
+
+
+def _patch_judge_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Заменить judge на passthrough — verdict от Extractor, sources от Retriever'а."""
+
+    async def fake_judge(raw, evidence, stance):
+        final_stance = stance["stance"]
+        if final_stance == "debunked_fully":
+            final_stance = "asserted"
+        return {
+            "text": raw["text"],
+            "start": raw["start"],
+            "verdict": raw["verdict"],
+            "type": raw["type"],
+            "explanation": raw.get("explanation", ""),
+            "confidence": raw.get("confidence", 0.5),
+            "sources": list(evidence["sources"]),
+            "stance": final_stance,
+            "stance_missing": stance.get("missing", ""),
+            "extractor_verdict": raw["verdict"],
+            "judge_notes": "",
+            "search_queries": None,
+        }
+
+    from agents import pipeline as pipeline_mod
+    monkeypatch.setattr(pipeline_mod, "judge", fake_judge)
+
+
 def _patch_pipeline_externals(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Подменяет stance + qa за один вызов — обычный набор для pipeline-тестов."""
+    """Подменяет все LLM/network вызовы pipeline'а за один заход.
+
+    Используется в pipeline-тестах, которые проверяют структуру, а не
+    качество работы конкретных агентов.
+    """
     _patch_stance_to_asserted(monkeypatch)
+    _patch_query_former_naive(monkeypatch)
+    _patch_retriever_one_mock(monkeypatch)
+    _patch_judge_passthrough(monkeypatch)
     _patch_qa_passthrough(monkeypatch)
 
 
@@ -158,6 +226,9 @@ def test_debunked_fully_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
     from agents import pipeline as pipeline_mod
     monkeypatch.setattr(pipeline_mod, "detect_stance", fake_stance)
     _patch_qa_passthrough(monkeypatch)
+    _patch_query_former_naive(monkeypatch)
+    _patch_retriever_one_mock(monkeypatch)
+    _patch_judge_passthrough(monkeypatch)
 
     result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
 
@@ -184,6 +255,9 @@ def test_quoted_neutral_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
     from agents import pipeline as pipeline_mod
     monkeypatch.setattr(pipeline_mod, "detect_stance", fake_stance)
     _patch_qa_passthrough(monkeypatch)
+    _patch_query_former_naive(monkeypatch)
+    _patch_retriever_one_mock(monkeypatch)
+    _patch_judge_passthrough(monkeypatch)
 
     result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
 
@@ -210,6 +284,9 @@ def test_debunked_drop_count_is_sum(monkeypatch: pytest.MonkeyPatch) -> None:
     from agents import pipeline as pipeline_mod
     monkeypatch.setattr(pipeline_mod, "detect_stance", fake_stance)
     _patch_qa_passthrough(monkeypatch)
+    _patch_query_former_naive(monkeypatch)
+    _patch_retriever_one_mock(monkeypatch)
+    _patch_judge_passthrough(monkeypatch)
 
     result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
 
@@ -235,6 +312,9 @@ def test_debunked_partially_keeps_missing(monkeypatch: pytest.MonkeyPatch) -> No
     from agents import pipeline as pipeline_mod
     monkeypatch.setattr(pipeline_mod, "detect_stance", fake_stance)
     _patch_qa_passthrough(monkeypatch)
+    _patch_query_former_naive(monkeypatch)
+    _patch_retriever_one_mock(monkeypatch)
+    _patch_judge_passthrough(monkeypatch)
 
     result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
 

@@ -26,7 +26,7 @@ from typing import TypedDict
 
 from .final_qa import qa_pass
 from .judge import judge
-from .query_former import make_queries
+from .query_former import make_queries_batch
 from .retriever import retrieve
 from .stance import detect_stance
 from .types import FinalClaim, RawClaim, Snippet
@@ -135,17 +135,36 @@ async def enrich(
             continue
         survivors.append((raw, s))
 
-    # --- Шаги 2-4: для каждого выжившего параллельно ----------------------
-    async def process_one(raw: RawClaim, s: "StanceLabel") -> FinalClaim:  # type: ignore[name-defined]
-        cq = await make_queries(raw)
+    # --- Шаг 2 (батч): Query Former для всех выживших одним вызовом -------
+    raw_survivors = [r for r, _ in survivors]
+    all_queries = await make_queries_batch(raw_survivors)
+    # Защита от рассинхронизации длин
+    if len(all_queries) != len(survivors):
+        log.warning(
+            "pipeline: make_queries_batch вернул %d вместо %d — добиваю наивными",
+            len(all_queries), len(survivors),
+        )
+        # выравнивание: добиваем недостающие наивным fallback'ом
+        from .query_former import _fallback_queries
+        all_queries = list(all_queries) + [
+            _fallback_queries(r) for r, _ in survivors[len(all_queries):]
+        ]
+
+    # --- Шаги 3-4: retrieve + judge параллельно для каждого claim'а ------
+    async def process_one(  # type: ignore[name-defined]
+        raw: RawClaim, s: "StanceLabel", cq
+    ) -> FinalClaim:
         ev = await retrieve(cq)
         fc = await judge(raw, ev, s)
-        # Запишем search_queries в FinalClaim для дебага (на P0 — наивные).
+        # Запишем search_queries в FinalClaim для дебага.
         fc["search_queries"] = cq["queries"]
         return fc
 
     final_claims_unordered = await asyncio.gather(
-        *(process_one(r, s) for r, s in survivors),
+        *(
+            process_one(r, s, cq)
+            for (r, s), cq in zip(survivors, all_queries)
+        ),
         return_exceptions=True,
     )
 
