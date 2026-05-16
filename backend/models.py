@@ -69,6 +69,11 @@ class Analysis(Base):
     # Какой моделью получено + версия промпта/детектора — пригодится при отладке
     model: Mapped[str] = mapped_column(String(128), default="")
     detector_version: Mapped[str] = mapped_column(String(32), default="")
+    # Версии остальных агентов (P0+): пустые строки пока агенты — stub'ы.
+    # См. docs/RAG_ARCHITECTURE.md §9 и docs/PROMPTS.md «Версионирование промптов».
+    stance_version: Mapped[str] = mapped_column(String(32), default="")
+    retriever_version: Mapped[str] = mapped_column(String(64), default="")
+    judge_version: Mapped[str] = mapped_column(String(32), default="")
 
     # Флаг последней версии — упрощает запрос «дай актуальное состояние»
     is_latest: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
@@ -79,6 +84,11 @@ class Analysis(Base):
     misleading_count: Mapped[int] = mapped_column(Integer, default=0)
     conflicting_count: Mapped[int] = mapped_column(Integer, default=0)
     sophism_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Сколько claim'ов отфильтровал Stance Detector как «автор сам разобрал»
+    # (то, что не показывается пользователю, но видно в метриках).
+    debunked_drop_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Сколько Judge оставил без вердикта (источников не нашлось).
+    unverifiable_count: Mapped[int] = mapped_column(Integer, default=0)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -104,10 +114,25 @@ class Claim(Base):
 
     text: Mapped[str] = mapped_column(Text)
     start: Mapped[float] = mapped_column(Float, index=True)
-    verdict: Mapped[str] = mapped_column(String(32))   # false / misleading / conflicting
+    verdict: Mapped[str] = mapped_column(String(32))   # false / misleading / conflicting / unverifiable
     type: Mapped[str] = mapped_column(String(32))      # claim / sophism
     explanation: Mapped[str] = mapped_column(Text, default="")
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     sources: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
+    # --- Аудит-поля от агентов (P0+) -----------------------------------
+    # Что говорил Extractor до того, как Judge переоценил verdict.
+    extractor_verdict: Mapped[str] = mapped_column(String(32), default="")
+    # Риторическая роль claim'а в видео по Stance Detector.
+    # "asserted" | "debunked_partially" | "quoted_neutral".
+    # "debunked_fully" сюда никогда не доходит — отфильтровано раньше.
+    stance: Mapped[str] = mapped_column(String(32), default="asserted")
+    # Для debunked_partially — что именно автор упустил.
+    stance_missing: Mapped[str] = mapped_column(Text, default="")
+    # Объяснение Judge: почему verdict такой (1-2 предложения, для дебага).
+    judge_notes: Mapped[str] = mapped_column(Text, default="")
+    # Поисковые запросы, которые Query Former сгенерировал для этого claim'а.
+    # JSONB: {"pubmed": [...], "who": [...], ...}.
+    search_queries: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     analysis: Mapped[Analysis] = relationship(back_populates="claims")
