@@ -1,0 +1,59 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# === Environment ===
+.env
+.env.local
+.env.*.local
+*.env
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# === Node / JS (Chrome Extension) ===
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# === RAG / Vector Store ===
+backend/rag/index/
+*.faiss
+*.pkl
+
+# === Logs ===
+*.log
+logs/
+
+# === Tests ===
+.pytest_cache/
+.coverage
+htmlcov/
+
+# === Jupyter ===
+.ipynb_checkpoints/
+*.ipynb
+
+# === OS ===
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db

@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "NorthMedAI",
+  "version": "0.1.0",
+  "description": "AI fact-checker for medical content on YouTube",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content_script.js"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
