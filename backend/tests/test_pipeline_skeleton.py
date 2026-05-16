@@ -66,6 +66,23 @@ def _make_raw_claims() -> list[RawClaim]:
 
 # --- Тесты -------------------------------------------------------------
 
+def _patch_stance_to_asserted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Хелпер: подменяет настоящий detect_stance (который ходит в YandexGPT)
+    на чистую функцию «всем asserted». Используется в тестах, где stance
+    нас не интересует — мы проверяем pipeline, а не stance.
+    """
+
+    async def fake_stance(transcript, claims):
+        return [
+            StanceLabel(claim_index=i, stance="asserted", missing="", confidence=0.0)
+            for i in range(len(claims))
+        ]
+
+    from agents import pipeline as pipeline_mod
+    monkeypatch.setattr(pipeline_mod, "detect_stance", fake_stance)
+
+
 def test_enrich_empty_input() -> None:
     """Пустой вход не должен падать и не должен звать агентов."""
     result = asyncio.run(enrich([], []))
@@ -74,8 +91,9 @@ def test_enrich_empty_input() -> None:
     assert result["stats"]["final_claims"] == 0
 
 
-def test_enrich_happy_path_p0() -> None:
+def test_enrich_happy_path_p0(monkeypatch: pytest.MonkeyPatch) -> None:
     """P0-stub: все claim'ы доходят, stance=asserted, 1 mock-source."""
+    _patch_stance_to_asserted(monkeypatch)
     result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
 
     assert len(result["claims"]) == 2, "оба claim'а должны пройти"
@@ -157,12 +175,13 @@ def test_debunked_partially_keeps_missing(monkeypatch: pytest.MonkeyPatch) -> No
     assert partial[0]["stance_missing"] == "не сказал про реальную профилактику"
 
 
-def test_pipeline_stats_keys_stable() -> None:
+def test_pipeline_stats_keys_stable(monkeypatch: pytest.MonkeyPatch) -> None:
     """Структура stats не должна меняться без явного перехода версии формата.
 
     Если этот тест упал — вы поменяли набор полей в PipelineStats. Подумайте,
     не сломает ли это main.py / save_analysis / front-end дашборд.
     """
+    _patch_stance_to_asserted(monkeypatch)
     result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
     expected_keys = {
         "claims_in",
