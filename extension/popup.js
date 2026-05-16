@@ -1,17 +1,6 @@
 /**
- * popup.js — UI попапа NorthMedAI.
- *
- * Связки:
- *   chrome.storage.sync.nmai_enabled — глобальный тумблер авто-проверки
- *   chrome.storage.sync.nmai_ticks   — показывать ли тики на таймлайне
- *   chrome.storage.sync.nmai_voice   — озвучка ошибок (пока заглушка)
- *   chrome.storage.sync.nmai_lang    — ru | en
- *   chrome.storage.sync.nmai_backend — URL бэкенда (default localhost:8000)
- *
- * Связь с активной вкладкой:
- *   getState/analyze — через background
- *   showOverlay      — отправка claims в content_script вкладки
- *   setEnabled / setTicks — мгновенное применение изменений в content_script
+ * popup.js — NorthMedAI UI
+ * Исправлено: на не-YouTube страницах статус соответствует реальному состоянию тумблера.
  */
 
 const STORAGE = {
@@ -19,7 +8,7 @@ const STORAGE = {
   ticks:   "nmai_ticks",
   voice:   "nmai_voice",
   lang:    "nmai_lang",
-  backend: "nmai_backend",
+  theme:   "nmai_theme",
 };
 
 const DEFAULTS = {
@@ -27,7 +16,7 @@ const DEFAULTS = {
   [STORAGE.ticks]:   true,
   [STORAGE.voice]:   false,
   [STORAGE.lang]:    detectInitialLang(),
-  [STORAGE.backend]: "http://localhost:8000",
+  [STORAGE.theme]:   "dark",
 };
 
 function detectInitialLang() {
@@ -35,188 +24,165 @@ function detectInitialLang() {
   return ui.startsWith("ru") ? "ru" : "en";
 }
 
-// ─── DOM refs ──────────────────────────────────────────────────────────────
-
+// ─── DOM элементы ──────────────────────────────────────────────────────────
 const els = {
-  mainView:      document.getElementById("main-view"),
-  settingsView:  document.getElementById("settings-view"),
-  settingsBtn:   document.getElementById("settings-btn"),
-  backBtn:       document.getElementById("back-btn"),
-  resetBtn:      document.getElementById("reset-btn"),
-
-  statusCard:    document.getElementById("status-card"),
-  statusTitle:   document.getElementById("status-title"),
-  statusSub:     document.getElementById("status-sub"),
-
-  enabledToggle: document.getElementById("enabled-toggle"),
-  ticksToggle:   document.getElementById("ticks-toggle"),
-  voiceToggle:   document.getElementById("voice-toggle"),
-
-  countFalse:    document.getElementById("count-false"),
-  countDisputed: document.getElementById("count-disputed"),
-  countSophism:  document.getElementById("count-sophism"),
+  mainView:          document.getElementById("main-view"),
+  settingsView:      document.getElementById("settings-view"),
+  backBtn:           document.getElementById("back-btn"),
+  resetBtn:          document.getElementById("reset-btn"),
+  statusCard:        document.getElementById("status-card"),
+  statusTitle:       document.getElementById("status-title"),
+  statusSub:         document.getElementById("status-sub"),
+  enabledToggle:     document.getElementById("enabled-toggle"),
+  ticksToggle:       document.getElementById("ticks-toggle"),
+  voiceToggle:       document.getElementById("voice-toggle"),
+  countFalse:        document.getElementById("count-false"),
+  countDisputed:     document.getElementById("count-disputed"),
+  countSophism:      document.getElementById("count-sophism"),
   tiles: {
     false:    document.querySelector(".tile.false"),
     disputed: document.querySelector(".tile.disputed"),
     sophism:  document.querySelector(".tile.sophism"),
   },
-
-  recheckBtn:    document.getElementById("recheck-btn"),
-  langChips:     document.querySelectorAll(".lang-chip"),
-  backendInput:  document.getElementById("backend-input"),
+  recheckBtn:        document.getElementById("recheck-btn"),
+  langChips:         document.querySelectorAll(".lang-chip"),
+  themeHeaderBtn:    document.getElementById("theme-header-btn"),
+  settingsHeaderBtn: document.getElementById("settings-header-btn"),
 };
 
-// ─── State ────────────────────────────────────────────────────────────────
-
 let currentLang = "ru";
-let currentTab  = null;
+let currentTab = null;
 
-// ─── Init ─────────────────────────────────────────────────────────────────
+// ─── Тема: загрузка, сохранение, переключение ─────────────────────────────
+function injectThemeStyles() {
+  if (document.getElementById("nmai-theme-styles")) return;
+  const style = document.createElement("style");
+  style.id = "nmai-theme-styles";
+  style.textContent = `
+    body.light-theme {
+      --bg:        #ffffff;
+      --surface:   #f6f8fa;
+      --surface-2: #eaeef2;
+      --border:    #d0d7de;
+      --text:      #1f2328;
+      --muted:     #656d76;
+      --muted-2:   #8c959f;
+      --accent:    #0969da;
+      --accent-2:  #0550ae;
+      --good:      #2da44e;
+      --warn:      #bf8700;
+      --bad:       #cf222e;
+      --purple:    #8250df;
+    }
+    body.light-theme .status-card.on {
+      border-color: rgba(45, 164, 78, 0.3);
+      background: linear-gradient(180deg, rgba(45,164,78,0.05), transparent 70%), var(--surface);
+    }
+    body.light-theme .slider {
+      background: #8c959f;
+    }
+    body.light-theme .slider::before {
+      background: white;
+    }
+    body.light-theme .lang-chip.active {
+      background: rgba(9, 105, 218, 0.1);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    body.light-theme .icon-btn:hover {
+      background: var(--surface-2);
+    }
+  `;
+  document.head.appendChild(style);
+}
 
-(async function init() {
-  const stored = await chrome.storage.sync.get(Object.values(STORAGE));
-  const cfg = { ...DEFAULTS, ...stored };
-
-  currentLang = cfg[STORAGE.lang];
-  applyI18n(currentLang);
-
-  els.enabledToggle.checked = cfg[STORAGE.enabled];
-  els.ticksToggle.checked   = cfg[STORAGE.ticks];
-  els.voiceToggle.checked   = cfg[STORAGE.voice];
-  els.backendInput.value    = cfg[STORAGE.backend];
-  markLangChip(currentLang);
-
-  [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-  if (isYouTubeVideo(currentTab?.url)) {
-    await loadCurrentState();
+async function loadTheme() {
+  const stored = await chrome.storage.local.get([STORAGE.theme]);
+  const theme = stored[STORAGE.theme] || DEFAULTS[STORAGE.theme];
+  if (theme === "light") {
+    document.body.classList.add("light-theme");
+    if (els.themeHeaderBtn) els.themeHeaderBtn.textContent = "☀️";
   } else {
-    setNotYouTubeState();
+    document.body.classList.remove("light-theme");
+    if (els.themeHeaderBtn) els.themeHeaderBtn.textContent = "🌙";
   }
+}
 
-  // Если статус видео потребовал перерисовки тумблера — он мог поменять enabled.
-  // Перечитаем после первой попытки.
-  refreshStatusFromToggle();
-})();
+async function setTheme(theme) {
+  await chrome.storage.local.set({ [STORAGE.theme]: theme });
+  if (theme === "light") {
+    document.body.classList.add("light-theme");
+    if (els.themeHeaderBtn) els.themeHeaderBtn.textContent = "☀️";
+  } else {
+    document.body.classList.remove("light-theme");
+    if (els.themeHeaderBtn) els.themeHeaderBtn.textContent = "🌙";
+  }
+}
 
+function toggleTheme() {
+  const isLight = document.body.classList.contains("light-theme");
+  setTheme(isLight ? "dark" : "light");
+}
+
+// ─── Вспомогательные функции ──────────────────────────────────────────────
 function isYouTubeVideo(url) {
   return !!url && /^https?:\/\/(www\.)?youtube\.com\/watch/.test(url);
 }
-
-// ─── i18n ─────────────────────────────────────────────────────────────────
 
 function applyI18n(lang) {
   currentLang = lang;
   document.querySelectorAll("[data-i18n]").forEach((node) => {
     const key = node.getAttribute("data-i18n");
-    node.textContent = window.NMAI_I18N.t(lang, key);
+    if (window.NMAI_I18N && window.NMAI_I18N.t) {
+      node.textContent = window.NMAI_I18N.t(lang, key);
+    }
   });
   document.querySelectorAll("[data-i18n-title]").forEach((node) => {
     const key = node.getAttribute("data-i18n-title");
-    node.title = window.NMAI_I18N.t(lang, key);
+    if (window.NMAI_I18N && window.NMAI_I18N.t) {
+      node.title = window.NMAI_I18N.t(lang, key);
+    }
   });
 }
 
 function markLangChip(lang) {
-  els.langChips.forEach((b) => {
-    b.classList.toggle("active", b.dataset.lang === lang);
+  els.langChips.forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.lang === lang);
   });
 }
-
-// ─── Status card ──────────────────────────────────────────────────────────
 
 function setStatus({ mode, title, sub }) {
   els.statusCard.classList.remove("on", "off", "checking");
   if (mode) els.statusCard.classList.add(mode);
   els.statusTitle.textContent = title ?? "";
-  els.statusSub.textContent   = sub ?? "";
+  els.statusSub.textContent = sub ?? "";
 }
 
-function refreshStatusFromToggle() {
-  // Вызывается когда нет реальных данных по видео, чтобы карточка показывала
-  // корректный «выкл/вкл» текст из i18n.
-  if (els.recheckBtn.disabled) return; // идёт анализ — не трогаем
-  if (!isYouTubeVideo(currentTab?.url)) return;
-
-  if (!els.enabledToggle.checked) {
-    setStatus({
-      mode: "off",
-      title: window.NMAI_I18N.t(currentLang, "auto_off_title"),
-      sub:   window.NMAI_I18N.t(currentLang, "auto_off_sub"),
-    });
-  }
-}
-
+// ✅ Исправленная функция для состояния "не YouTube"
 function setNotYouTubeState() {
+  const isEnabled = els.enabledToggle.checked;
+  const title = isEnabled
+    ? (window.NMAI_I18N?.t(currentLang, "auto_on_title") || "Авто-проверка включена")
+    : (window.NMAI_I18N?.t(currentLang, "auto_off_title") || "Авто-проверка выключена");
+  const sub = window.NMAI_I18N?.t(currentLang, "not_youtube") || "Откройте YouTube видео";
   setStatus({
     mode: "off",
-    title: window.NMAI_I18N.t(currentLang, "auto_off_title"),
-    sub:   window.NMAI_I18N.t(currentLang, "not_youtube"),
+    title: title,
+    sub: sub,
   });
   els.recheckBtn.disabled = true;
 }
 
-// ─── Loading state from backend ───────────────────────────────────────────
-
-async function loadCurrentState() {
+function refreshStatusFromToggle() {
+  if (els.recheckBtn.disabled) return;
+  if (!isYouTubeVideo(currentTab?.url)) return;
   if (!els.enabledToggle.checked) {
     setStatus({
       mode: "off",
-      title: window.NMAI_I18N.t(currentLang, "auto_off_title"),
-      sub:   window.NMAI_I18N.t(currentLang, "auto_off_sub"),
+      title: window.NMAI_I18N?.t(currentLang, "auto_off_title") || "Автоматическая проверка выключена",
+      sub: window.NMAI_I18N?.t(currentLang, "auto_off_sub") || "Включите, чтобы анализировать видео",
     });
-    return;
   }
-
-  setStatus({
-    mode: "checking",
-    title: window.NMAI_I18N.t(currentLang, "checking"),
-    sub:   "",
-  });
-
-  const resp = await sendMessageAsync({ action: "getState", url: currentTab.url });
-  if (resp?.notFound) {
-    // Запись ещё не создана — content_script сам сделает analyze.
-    // Здесь просто покажем "анализирую".
-    return;
-  }
-  handleResponse(resp);
-}
-
-// ─── Reactions to backend response ────────────────────────────────────────
-
-function handleResponse(resp) {
-  if (!resp?.ok) {
-    const msg = resp?.error ?? window.NMAI_I18N.t(currentLang, "err_unknown");
-    let key = null;
-    if (msg.includes("Connection reset") || msg.includes("502") || msg.includes("временно не отдаёт")) key = "err_connection_reset";
-    else if (msg.includes("отключены") || msg.includes("не найдено") || msg.includes("subtitles")) key = "err_no_subtitles";
-
-    setStatus({
-      mode: "off",
-      title: window.NMAI_I18N.t(currentLang, "err_unknown"),
-      sub:   key ? window.NMAI_I18N.t(currentLang, key) : msg,
-    });
-    return;
-  }
-
-  const data = resp.data ?? {};
-  const claims = data.claims ?? [];
-  showCounts(claims);
-
-  const ttl = window.NMAI_I18N.t(currentLang, "auto_on_title");
-  const cnt = window.NMAI_I18N.claimsCount(currentLang, claims.length);
-  const sub = data.cached
-    ? window.NMAI_I18N.t(currentLang, "cache_loaded", { when: formatDate(data.created_at) })
-    : cnt;
-
-  setStatus({
-    mode: "on",
-    title: data.cached ? ttl : cnt,
-    sub:   data.cached ? cnt + " · " + sub : sub,
-  });
-
-  pushOverlayToTab(claims);
 }
 
 function showCounts(claims) {
@@ -224,9 +190,9 @@ function showCounts(claims) {
   const d = claims.filter(c => c.verdict === "misleading" || c.verdict === "conflicting").length;
   const s = claims.filter(c => c.type === "sophism").length;
 
-  els.countFalse.textContent    = f;
+  els.countFalse.textContent = f;
   els.countDisputed.textContent = d;
-  els.countSophism.textContent  = s;
+  els.countSophism.textContent = s;
 
   els.tiles.false.classList.toggle("zero", f === 0);
   els.tiles.disputed.classList.toggle("zero", d === 0);
@@ -238,98 +204,56 @@ async function pushOverlayToTab(claims) {
   chrome.tabs.sendMessage(currentTab.id, { action: "showOverlay", claims }).catch(() => {});
 }
 
-// ─── Listeners: главный тумблер ──────────────────────────────────────────
-
-els.enabledToggle.addEventListener("change", async () => {
-  const v = els.enabledToggle.checked;
-  await chrome.storage.sync.set({ [STORAGE.enabled]: v });
-  // background сам разошлёт всем YouTube-вкладкам setEnabled (см. background.js)
-  if (v) {
-    if (isYouTubeVideo(currentTab?.url)) loadCurrentState();
-    else setNotYouTubeState();
-  } else {
+function handleResponse(resp) {
+  if (!resp?.ok) {
+    const msg = resp?.error ?? "Ошибка анализа";
+    let key = null;
+    if (msg.includes("Connection reset") || msg.includes("502") || msg.includes("временно")) key = "err_connection_reset";
+    else if (msg.includes("отключены") || msg.includes("subtitles")) key = "err_no_subtitles";
     setStatus({
       mode: "off",
-      title: window.NMAI_I18N.t(currentLang, "auto_off_title"),
-      sub:   window.NMAI_I18N.t(currentLang, "auto_off_sub"),
+      title: window.NMAI_I18N?.t(currentLang, "err_unknown") || "Ошибка",
+      sub: key ? (window.NMAI_I18N?.t(currentLang, key) || msg) : msg,
     });
-    // Тут же скрываем overlay в активной вкладке
-    if (currentTab?.id) chrome.tabs.sendMessage(currentTab.id, { action: "setEnabled", enabled: false }).catch(() => {});
+    return;
   }
-});
 
-// ─── Listeners: тики ─────────────────────────────────────────────────────
+  const data = resp.data ?? {};
+  const claims = data.claims ?? [];
+  showCounts(claims);
 
-els.ticksToggle.addEventListener("change", async () => {
-  const v = els.ticksToggle.checked;
-  await chrome.storage.sync.set({ [STORAGE.ticks]: v });
-  if (currentTab?.id) {
-    chrome.tabs.sendMessage(currentTab.id, { action: "setTicks", enabled: v }).catch(() => {});
-  }
-});
-
-// ─── Listeners: voice (заглушка) ─────────────────────────────────────────
-
-els.voiceToggle.addEventListener("change", async () => {
-  await chrome.storage.sync.set({ [STORAGE.voice]: els.voiceToggle.checked });
-  console.log("[NMAI] voice toggle changed — фича пока не реализована");
-});
-
-// ─── Listeners: re-check ─────────────────────────────────────────────────
-
-els.recheckBtn.addEventListener("click", async () => {
-  if (!isYouTubeVideo(currentTab?.url)) return;
-  els.recheckBtn.disabled = true;
+  const ttl = window.NMAI_I18N?.t(currentLang, "auto_on_title") || "Анализ выполнен";
+  const cnt = window.NMAI_I18N?.claimsCount?.(currentLang, claims.length) || `${claims.length} утверждений`;
+  const sub = data.cached
+    ? window.NMAI_I18N?.t(currentLang, "cache_loaded", { when: formatDate(data.created_at) }) || "из кеша"
+    : cnt;
 
   setStatus({
+    mode: "on",
+    title: data.cached ? ttl : cnt,
+    sub: data.cached ? cnt + " · " + sub : sub,
+  });
+  pushOverlayToTab(claims);
+}
+
+async function loadCurrentState() {
+  if (!els.enabledToggle.checked) {
+    setStatus({
+      mode: "off",
+      title: window.NMAI_I18N?.t(currentLang, "auto_off_title") || "Выключено",
+      sub: window.NMAI_I18N?.t(currentLang, "auto_off_sub") || "",
+    });
+    return;
+  }
+  setStatus({
     mode: "checking",
-    title: window.NMAI_I18N.t(currentLang, "checking"),
-    sub:   "",
+    title: window.NMAI_I18N?.t(currentLang, "checking") || "Анализируем...",
+    sub: "",
   });
-
-  const resp = await sendMessageAsync({ action: "reanalyze", url: currentTab.url });
-  els.recheckBtn.disabled = false;
+  const resp = await sendMessageAsync({ action: "getState", url: currentTab.url });
+  if (resp?.notFound) return;
   handleResponse(resp);
-});
-
-// ─── Listeners: Settings ─────────────────────────────────────────────────
-
-els.settingsBtn.addEventListener("click", () => {
-  els.settingsView.classList.add("open");
-});
-els.backBtn.addEventListener("click", () => {
-  els.settingsView.classList.remove("open");
-});
-
-els.langChips.forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const lang = btn.dataset.lang;
-    await chrome.storage.sync.set({ [STORAGE.lang]: lang });
-    applyI18n(lang);
-    markLangChip(lang);
-    // обновим статус-карточку (там тоже текст из i18n)
-    refreshStatusFromToggle();
-  });
-});
-
-els.backendInput.addEventListener("change", async () => {
-  const v = els.backendInput.value.trim() || DEFAULTS[STORAGE.backend];
-  await chrome.storage.sync.set({ [STORAGE.backend]: v });
-});
-
-els.resetBtn.addEventListener("click", async () => {
-  await chrome.storage.sync.clear();
-  await chrome.storage.sync.set(DEFAULTS);
-  // Перечитываем
-  Object.assign(els.enabledToggle, { checked: DEFAULTS[STORAGE.enabled] });
-  Object.assign(els.ticksToggle,   { checked: DEFAULTS[STORAGE.ticks] });
-  Object.assign(els.voiceToggle,   { checked: DEFAULTS[STORAGE.voice] });
-  els.backendInput.value = DEFAULTS[STORAGE.backend];
-  applyI18n(DEFAULTS[STORAGE.lang]);
-  markLangChip(DEFAULTS[STORAGE.lang]);
-});
-
-// ─── Helpers ──────────────────────────────────────────────────────────────
+}
 
 function sendMessageAsync(msg) {
   return new Promise((resolve) => {
@@ -347,9 +271,144 @@ function formatDate(iso) {
   if (!iso) return "";
   try {
     const d = new Date(iso);
-    return d.toLocaleString(currentLang === "ru" ? "ru-RU" : "en-US",
-      { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleString(currentLang === "ru" ? "ru-RU" : "en-US", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   } catch {
     return iso;
   }
+}
+
+// ─── Инициализация ─────────────────────────────────────────────────────────
+(async function init() {
+  injectThemeStyles();
+  await loadTheme();
+
+  const stored = await chrome.storage.sync.get(Object.values(STORAGE));
+  const cfg = { ...DEFAULTS, ...stored };
+
+  currentLang = cfg[STORAGE.lang];
+  applyI18n(currentLang);
+  markLangChip(currentLang);
+
+  els.enabledToggle.checked = cfg[STORAGE.enabled];
+  els.ticksToggle.checked = cfg[STORAGE.ticks];
+  els.voiceToggle.checked = cfg[STORAGE.voice];
+
+  [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  if (isYouTubeVideo(currentTab?.url)) {
+    await loadCurrentState();
+  } else {
+    setNotYouTubeState();  // теперь учитывает реальное состояние тумблера
+  }
+  refreshStatusFromToggle();
+})();
+
+// ─── Обработчики событий ───────────────────────────────────────────────────
+els.enabledToggle.addEventListener("change", async () => {
+  const v = els.enabledToggle.checked;
+  await chrome.storage.sync.set({ [STORAGE.enabled]: v });
+  if (v) {
+    if (isYouTubeVideo(currentTab?.url)) {
+      await loadCurrentState();
+    } else {
+      setNotYouTubeState();  // обновляем статус для не-YouTube
+    }
+  } else {
+    if (isYouTubeVideo(currentTab?.url)) {
+      setStatus({
+        mode: "off",
+        title: window.NMAI_I18N?.t(currentLang, "auto_off_title") || "Выключено",
+        sub: window.NMAI_I18N?.t(currentLang, "auto_off_sub") || "",
+      });
+      if (currentTab?.id) chrome.tabs.sendMessage(currentTab.id, { action: "setEnabled", enabled: false }).catch(() => {});
+    } else {
+      setNotYouTubeState();  // при выключении на не-YouTube
+    }
+  }
+});
+
+els.ticksToggle.addEventListener("change", async () => {
+  const v = els.ticksToggle.checked;
+  await chrome.storage.sync.set({ [STORAGE.ticks]: v });
+  if (currentTab?.id) {
+    chrome.tabs.sendMessage(currentTab.id, { action: "setTicks", enabled: v }).catch(() => {});
+  }
+});
+
+els.voiceToggle.addEventListener("change", async () => {
+  await chrome.storage.sync.set({ [STORAGE.voice]: els.voiceToggle.checked });
+  // голос пока не реализован
+});
+
+els.recheckBtn.addEventListener("click", async () => {
+  if (!isYouTubeVideo(currentTab?.url)) return;
+  els.recheckBtn.disabled = true;
+  setStatus({
+    mode: "checking",
+    title: window.NMAI_I18N?.t(currentLang, "checking") || "Анализируем...",
+    sub: "",
+  });
+  const resp = await sendMessageAsync({ action: "reanalyze", url: currentTab.url });
+  els.recheckBtn.disabled = false;
+  handleResponse(resp);
+});
+
+// Настройки: открытие/закрытие
+if (els.settingsHeaderBtn) {
+  els.settingsHeaderBtn.addEventListener("click", () => {
+    els.settingsView.classList.add("open");
+  });
+}
+els.backBtn.addEventListener("click", () => {
+  els.settingsView.classList.remove("open");
+});
+
+// Переключение языка
+els.langChips.forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const lang = btn.dataset.lang;
+    await chrome.storage.sync.set({ [STORAGE.lang]: lang });
+    applyI18n(lang);
+    markLangChip(lang);
+    refreshStatusFromToggle();
+    if (isYouTubeVideo(currentTab?.url) && els.enabledToggle.checked) {
+      await loadCurrentState();
+    } else {
+      if (!isYouTubeVideo(currentTab?.url)) {
+        setNotYouTubeState();
+      } else if (!els.enabledToggle.checked) {
+        setStatus({
+          mode: "off",
+          title: window.NMAI_I18N?.t(currentLang, "auto_off_title") || "Выключено",
+          sub: window.NMAI_I18N?.t(currentLang, "auto_off_sub") || "",
+        });
+      }
+    }
+  });
+});
+
+// Кнопка сброса настроек
+els.resetBtn.addEventListener("click", async () => {
+  await chrome.storage.sync.clear();
+  await chrome.storage.sync.set(DEFAULTS);
+  els.enabledToggle.checked = DEFAULTS[STORAGE.enabled];
+  els.ticksToggle.checked = DEFAULTS[STORAGE.ticks];
+  els.voiceToggle.checked = DEFAULTS[STORAGE.voice];
+  applyI18n(DEFAULTS[STORAGE.lang]);
+  markLangChip(DEFAULTS[STORAGE.lang]);
+  if (isYouTubeVideo(currentTab?.url)) {
+    await loadCurrentState();
+  } else {
+    setNotYouTubeState();
+  }
+});
+
+// Кнопка темы в шапке
+if (els.themeHeaderBtn) {
+  els.themeHeaderBtn.addEventListener("click", toggleTheme);
 }
