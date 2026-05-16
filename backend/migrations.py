@@ -30,7 +30,10 @@ log = logging.getLogger("db.migrations")
 # существующие. Имя версии — только для логов и не пишется в БД (если
 # понадобится отслеживание applied-миграций, заведём табличку schema_migrations
 # и перепишем под неё).
-MIGRATIONS: list[tuple[str, str]] = [
+# Каждая миграция: (имя, SQL, optional).
+# optional=True — провал лога но не блокирует startup приложения. Это
+# нужно для RAG-миграций, которым требуется pgvector в Postgres-инстансе.
+MIGRATIONS: list[tuple[str, str, bool]] = [
     (
         "M0001_analyses_agent_versions",
         """
@@ -41,6 +44,7 @@ MIGRATIONS: list[tuple[str, str]] = [
           ADD COLUMN IF NOT EXISTS debunked_drop_count INTEGER    DEFAULT 0  NOT NULL,
           ADD COLUMN IF NOT EXISTS unverifiable_count  INTEGER    DEFAULT 0  NOT NULL;
         """,
+        False,
     ),
     (
         "M0001_claims_audit_fields",
@@ -52,6 +56,7 @@ MIGRATIONS: list[tuple[str, str]] = [
           ADD COLUMN IF NOT EXISTS judge_notes       TEXT        DEFAULT '' NOT NULL,
           ADD COLUMN IF NOT EXISTS search_queries    JSONB       DEFAULT NULL;
         """,
+        False,
     ),
     (
         "M0002_analyses_qa_version",
@@ -59,13 +64,49 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE analyses
           ADD COLUMN IF NOT EXISTS qa_version VARCHAR(32) DEFAULT '' NOT NULL;
         """,
+        False,
+    ),
+    # M0003 — локальный RAG. Опциональны: если инстанс БЕЗ pgvector
+    # (старый postgres:16-alpine), они упадут с WARNING, но pipeline
+    # запустится. corpus.py будет возвращать [] до тех пор, пока
+    # docker-compose не пересоберётся на pgvector/pgvector:pg16.
+    (
+        "M0003_pgvector_extension",
+        "CREATE EXTENSION IF NOT EXISTS vector;",
+        True,
+    ),
+    (
+        "M0003_corpus_chunks_vector_column",
+        # 1024 = размерность text-search-doc от Yandex Embeddings.
+        """
+        ALTER TABLE corpus_chunks
+          ADD COLUMN IF NOT EXISTS embedding vector(1024);
+        """,
+        True,
+    ),
+    (
+        "M0003_corpus_chunks_ivfflat_index",
+        # IVFFlat — самый практичный ANN-индекс в pgvector для нашего
+        # объёма (тысячи-десятки тысяч chunks). 100 списков — старт.
+        """
+        CREATE INDEX IF NOT EXISTS ix_corpus_chunks_embedding
+        ON corpus_chunks
+        USING ivfflat (embedding vector_cosine_ops)
+        WITH (lists = 100);
+        """,
+        True,
     ),
 ]
 
 
 async def apply_inplace_migrations(conn: AsyncConnection) -> None:
-    """Прогоняет все миграции по порядку. Безопасно повторно вызывать."""
-    for name, sql in MIGRATIONS:
+    """Прогоняет все миграции по порядку. Безопасно повторно вызывать.
+
+    `optional=True` миграции при сбое не блокируют startup — пишут WARNING
+    и переходят к следующей. Используется для RAG-расширения, которое
+    зависит от pgvector в Postgres-инстансе.
+    """
+    for name, sql, optional in MIGRATIONS:
         # Если БД на SQLite (например, в юнит-тестах) — `ALTER TABLE ... ADD
         # COLUMN IF NOT EXISTS` не поддерживается. Пропускаем тихо: в тестах
         # на чистой SQLite-базе таблицы создаются `create_all` уже с нужными
@@ -78,6 +119,15 @@ async def apply_inplace_migrations(conn: AsyncConnection) -> None:
             await conn.execute(text(sql))
             log.info("migration applied: %s", name)
         except Exception:  # noqa: BLE001
+            if optional:
+                log.warning(
+                    "migration %s (optional) не применилась — продолжаю. "
+                    "Часто причина: расширение pgvector не установлено в инстансе. "
+                    "RAG-функции работать не будут до тех пор, пока контейнер не "
+                    "будет пересобран на pgvector/pgvector:pg16.",
+                    name,
+                )
+                continue
             log.exception("migration failed: %s", name)
             raise
 

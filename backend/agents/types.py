@@ -74,6 +74,7 @@ SourceTier = Literal[
     "cdc_nejm",
     "minzdrav",
     "news_major",
+    "corpus",     # локальный RAG-корпус PDF (см. agents/sources/corpus.py)
     "unknown",
 ]
 

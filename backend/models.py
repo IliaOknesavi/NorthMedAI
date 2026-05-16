@@ -105,6 +105,40 @@ class Analysis(Base):
     )
 
 
+class CorpusChunk(Base):
+    """
+    Локальный RAG-корпус: кусок документа (обычно PDF) с эмбеддингом.
+
+    Используется agents/sources/corpus.py для поиска по «ядерным» PDF
+    (WHO guidelines, клинические рекомендации Минздрава и т.п.), которые
+    мы загрузили заранее через `python -m corpus_ingest`.
+
+    Эмбеддинги — Yandex Embeddings (text-search-doc), 1024 dim.
+
+    Если в Postgres-инстансе НЕ установлено расширение pgvector, эта
+    таблица не создаётся (миграция M0003 падает с warning). Pipeline
+    продолжает работать через остальные адаптеры — RAG просто пуст.
+    """
+
+    __tablename__ = "corpus_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # URL/путь источника — для оригинального документа (ссылка для пользователя)
+    doc_url: Mapped[str] = mapped_column(String(1000), index=True)
+    doc_title: Mapped[str] = mapped_column(String(500), default="")
+    # Тир для веса в Retriever'е: 'who' | 'minzdrav' | 'cdc_nejm' | 'corpus'
+    doc_tier: Mapped[str] = mapped_column(String(32), default="corpus", index=True)
+    chunk_idx: Mapped[int] = mapped_column(Integer, default=0)
+    text: Mapped[str] = mapped_column(Text)
+    # Метаданные: страница PDF, секция документа, ключевые слова — что
+    # положили на ingest'е. JSON ради гибкости.
+    chunk_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Эмбеддинг колонка добавляется через миграцию M0003 (требует pgvector).
+    # В ORM не объявляем — манипуляции через сырой SQL в corpus.py.
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class Claim(Base):
     __tablename__ = "claims"
 

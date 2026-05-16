@@ -86,19 +86,54 @@ async def retrieve(claim_queries: ClaimQueries) -> Evidence:
     claim_text = claim_queries["claim_text"]
     queries = claim_queries["queries"]
 
+    # Маппинг ClaimQueries-ключей в SourceTier из ADAPTERS.
+    # У нас есть лёгкое расхождение: в QueriesPerSource ключ "news",
+    # а тир — "news_major" (видно в дизайн-доке). Преобразуем здесь.
+    TIER_FOR_QUERY_KEY = {
+        "pubmed": "pubmed",
+        "who": "who",
+        "cdc_nejm": "cdc_nejm",
+        "minzdrav": "minzdrav",
+        "news": "news_major",
+    }
+
     # Какие адаптеры зовём — те, у которых в ClaimQueries есть непустые запросы
     tasks: list[tuple[str, asyncio.Task[tuple[list[Source], str | None]]]] = []
-    for tier, q_list in queries.items():
+    for query_key, q_list in queries.items():
         if not q_list:
+            continue
+        tier = TIER_FOR_QUERY_KEY.get(query_key)
+        if tier is None:
+            log.debug("retriever: неизвестный ключ запросов %r — пропускаю", query_key)
             continue
         adapter = ADAPTERS.get(tier)  # type: ignore[arg-type]
         if adapter is None:
             log.debug("retriever: адаптер %s не зарегистрирован, пропускаю", tier)
             continue
-        lang = "ru" if tier in {"minzdrav"} else ("ru" if tier == "news" else "en")
+        lang = "ru" if tier in {"minzdrav", "news_major"} else "en"
         tasks.append(
             (tier, asyncio.create_task(_run_adapter(adapter, list(q_list), lang)))
         )
+
+    # Локальный RAG-корпус не имеет своего ключа в QueriesPerSource —
+    # ищем по нему параллельно теми же словами, что для научных tier'ов.
+    # Если адаптер 'corpus' зарегистрирован и в БД что-то загружено —
+    # он вернёт что-то полезное, иначе []. Cost: 1-2 Yandex Embeddings
+    # query'а на claim.
+    corpus_adapter = ADAPTERS.get("corpus")
+    if corpus_adapter is not None:
+        # Собираем все «научные» запросы — pubmed/who/cdc_nejm/minzdrav.
+        # News-запросы не используем — корпус не про новости.
+        corpus_queries: list[str] = []
+        for key in ("pubmed", "who", "cdc_nejm", "minzdrav"):
+            corpus_queries.extend(queries.get(key, []) or [])  # type: ignore[arg-type]
+        # Берём максимум 2 уникальных запроса — embeddings стоят денег
+        unique_q = list(dict.fromkeys(q for q in corpus_queries if q.strip()))[:2]
+        if unique_q:
+            tasks.append((
+                "corpus",
+                asyncio.create_task(_run_adapter(corpus_adapter, unique_q, "ru")),
+            ))
 
     if not tasks:
         log.info("retriever: ни одного зарегистрированного адаптера — fallback")

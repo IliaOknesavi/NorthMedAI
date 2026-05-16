@@ -12,6 +12,7 @@ from __future__ import annotations
 from ..types import SourceTier
 from ._base import SourceAdapter
 from .cdc_nejm import ADAPTER as _CDC_NEJM
+from .corpus import ADAPTER as _CORPUS
 from .minzdrav import ADAPTER as _MINZDRAV
 from .news_major import ADAPTER as _NEWS_MAJOR
 from .pubmed import ADAPTER as _PUBMED
@@ -24,12 +25,17 @@ from .who import ADAPTER as _WHO
 # отдельной проверки на наличие ключа — общий клиент `_yandex_search.py`
 # сам делает graceful fallback на пустой список при отсутствии
 # YANDEX_SEARCH_API_KEY в .env.
+#
+# Адаптер 'corpus' — локальный RAG, smoothly работает только при наличии
+# pgvector в Postgres и загруженных chunks через `python -m corpus_ingest`.
+# Иначе тоже возвращает [].
 ADAPTERS: dict[SourceTier, SourceAdapter] = {
     "pubmed": _PUBMED,
     "who": _WHO,
     "cdc_nejm": _CDC_NEJM,
     "minzdrav": _MINZDRAV,
     "news_major": _NEWS_MAJOR,
+    "corpus": _CORPUS,
 }
 
 __all__ = ["SourceAdapter", "ADAPTERS"]

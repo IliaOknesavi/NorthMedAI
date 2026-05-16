@@ -1,6 +1,11 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector расширение нужно для локального RAG (см. agents/sources/corpus.py
+    # и docs/RAG_ARCHITECTURE.md §9.3). Image имеет всё что есть в постгрес 16
+    # плюс предустановленное расширение vector. Если переключаешься на старый
+    # postgres:16-alpine — RAG-таблицы не создадутся, миграция M0003 упадёт с
+    # warning, но pipeline продолжит работать (PubMed + whitelist'ы — без RAG).
+    image: pgvector/pgvector:pg16
     container_name: nmai-postgres
     restart: unless-stopped
     environment:
