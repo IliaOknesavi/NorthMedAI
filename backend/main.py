@@ -30,6 +30,7 @@ from db import (
 )
 from agents.prompts import (
     JUDGE_VERSION,
+    QA_VERSION,
     RETRIEVER_VERSION,
     STANCE_VERSION,
 )
@@ -333,6 +334,7 @@ async def _run_fresh_analysis(session: AsyncSession, video_id: str) -> dict:
         stance_version=STANCE_VERSION,
         retriever_version=RETRIEVER_VERSION,
         judge_version=JUDGE_VERSION,
+        qa_version=QA_VERSION,
         debunked_drop_count=(stats["debunked_drop_count"] if stats else 0),
     )
 

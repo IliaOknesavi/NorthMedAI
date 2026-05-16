@@ -111,15 +111,23 @@
                     │  при пересчёте      │   explanation: «Автор разобрал
                     │  verdict, confidence│    частично: …»
                     └──────────┬──────────┘
-                               │ final_claims[] с sources и stance
+                               │ final_claims[] (предварительный)
+                               ▼
+                    ┌─────────────────────┐
+        Шаг 5       │  Final QA           │   новый, YandexGPT
+                    │  drop / repair /    │   batch на video: видит
+                    │  dedup поверх       │   transcript + все final_claims,
+                    │  final_claims       │   последнее слово
+                    └──────────┬──────────┘
+                               │ cleaned final_claims[]
                                ▼
                        db.save_analysis
                        → ответ клиенту
 ```
 
 Каждый шаг — отдельный модуль, заменяемый. Шаги 2 и 3 могут идти параллельно
-по разным claim'ам (см. §10). Шаг 1.5 — единственный, не параллелизуемый
-по claim'ам, потому что работает на полном транскрипте сразу.
+по разным claim'ам (см. §10). Шаги 1.5 и 5 — единственные, не параллелизуемые
+по claim'ам, потому что работают на полном транскрипте + всех claim'ах сразу.
 
 ---
 
@@ -322,36 +330,91 @@ class SourceAdapter(Protocol):
 
 Подробности по каждому — §5.
 
-### 4.4.5 ☐ Final QA — `agents/final_qa.py` (TODO, не в P1)
+### 4.6 Final QA — `agents/final_qa.py`
 
-Идея зародилась после второго живого прогона: даже после Stance/Judge в
-финальном списке проскакивают claim'ы, которые не должны там быть.
-Примеры:
-- «не пейте перекись водорода» — это совет автора, который не отловили
-  ни Extractor, ни Stance, ни Judge;
-- два claim'а про один и тот же миф, сформулированные слегка по-разному —
-  показывать обе метки = шум;
-- claim, который Judge переоценил, но его explanation не консистентен с
-  переписанным verdict.
+Финальный whole-video QA-проход. Запускается после Judge всегда. Решает
+проблему оставшихся false-positives, которые ни Extractor, ни Stance,
+ни Judge поодиночке не отловили:
 
-Что должен делать Final QA:
-1. Принять `(transcript, final_claims[])`;
-2. Прочитать всё сразу одним вызовом YandexGPT;
-3. Для каждого claim'а сказать:
-   - keep / drop (с причиной);
-   - при keep — поправить ли explanation (опционально);
-4. Найти дубликаты и схлопнуть их в один claim с агрегированными sources.
+- claim'ы про **верные утверждения автора, подкреплённые исследованиями**
+  (Extractor зря выписал; Stance честно поставил asserted, потому что
+  автор действительно это утверждает; Judge не мог опровергнуть, потому
+  что фактически это правда);
+- **дубликаты**: один миф, два слегка разных claim'а;
+- **внутренние противоречия**: Judge поставил verdict X, а explanation
+  читается как Y — нужно привести к одному.
 
-Открытые вопросы по Final QA (зафиксировать прежде чем писать):
-- **Скоуп правок:** только drop + dedup, или ещё может править verdict?
-  Если может — есть риск конкуренции с Judge.
-- **Где хранить причину drop'а:** новое поле `qa_drop_reason` в `Analysis.notes`?
-- **Метрика:** добавить `qa_drop_count` в `PipelineStats`?
-- **Когда зовём:** после Judge всегда, или только если в pipeline было ≥1
-  предупреждение от других агентов?
+#### Контракт
 
-P2-задача. До тех пор временно — точечные правила в Extractor и Stance
-ловят основные false positives.
+```python
+async def qa_pass(
+    transcript: list[Snippet],
+    final_claims: list[FinalClaim],
+) -> QAResult
+```
+
+```python
+QAResult = {
+  "claims": list[FinalClaim],   # после применения всех действий
+  "actions": list[QAAction],    # что QA решил по каждому claim'у — для логов
+  "errors": list[str],
+}
+
+QAAction = {
+  "claim_indices": list[int],   # к каким claim'ам (один или несколько для dedup)
+  "action": "keep" | "drop" | "repair" | "dedup_into",
+  "reason": str,                # человеко-читаемая причина
+  # Для repair — что подменить в claim'е:
+  "patch_verdict": str | None,
+  "patch_explanation": str | None,
+  # Для dedup_into — в какой claim слить:
+  "merge_into": int | None,
+}
+```
+
+#### Правила применения изменений
+
+QA — последний голос. Если QA говорит «drop», claim не попадает в БД
+вообще (согласно решению: дроп полный, в БД не пишем). Если «repair» —
+у Judge'а текст переписывается, но `extractor_verdict` и `judge_notes`
+остаются (история сохраняется в этих полях).
+
+Иерархия влияния на verdict (от слабого к сильному):
+```
+Extractor.verdict
+   → Stance может удалить (debunked_fully/quoted_neutral → drop)
+       → Judge может переоценить (false → unverifiable, и т.п.)
+           → QA может переоценить ещё раз (последнее слово)
+```
+
+#### Когда зовём
+
+**Всегда после Judge**, даже если final_claims пуст (тогда QA — no-op).
+Стоимость +1 YandexGPT вызов на /analyze (5-10 секунд) — приемлемо для
+качества. Альтернативы (условный вызов, dry-run) добавляют сложность
+без явной выгоды.
+
+#### Что НЕ хранится в БД
+
+Дропнутые QA claim'ы. Согласно решению: чистая БД, никаких
+`qa_dropped=true` записей. Это значит:
+- мы не можем в `/history` посмотреть, что QA отверг (только узнаем общее
+  число через `PipelineStats.qa_dropped_count` в логах);
+- для тюнинга промпта смотрим логи `agents.final_qa` (raw response).
+
+Версия QA пишется в `Analysis.qa_version` — это нужно, чтобы /history
+различал прогоны разных версий промпта.
+
+#### Failure mode
+
+Если LLM упала / вернула невалидный JSON / промпт сорвался — QA
+возвращает claims БЕЗ изменений (как будто его не было). Pipeline
+продолжает работать.
+
+#### Промпт
+
+См. [PROMPTS.md → Final QA](./PROMPTS.md#final-qa). Версия —
+`QA_VERSION` в `agents/prompts.py`.
 
 ### 4.5 Judge — `agents/judge.py` (новый)
 

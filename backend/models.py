@@ -74,6 +74,7 @@ class Analysis(Base):
     stance_version: Mapped[str] = mapped_column(String(32), default="")
     retriever_version: Mapped[str] = mapped_column(String(64), default="")
     judge_version: Mapped[str] = mapped_column(String(32), default="")
+    qa_version: Mapped[str] = mapped_column(String(32), default="")
 
     # Флаг последней версии — упрощает запрос «дай актуальное состояние»
     is_latest: Mapped[bool] = mapped_column(Boolean, default=True, index=True)

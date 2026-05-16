@@ -53,6 +53,13 @@ MIGRATIONS: list[tuple[str, str]] = [
           ADD COLUMN IF NOT EXISTS search_queries    JSONB       DEFAULT NULL;
         """,
     ),
+    (
+        "M0002_analyses_qa_version",
+        """
+        ALTER TABLE analyses
+          ADD COLUMN IF NOT EXISTS qa_version VARCHAR(32) DEFAULT '' NOT NULL;
+        """,
+    ),
 ]
 
 

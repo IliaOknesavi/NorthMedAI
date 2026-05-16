@@ -18,6 +18,7 @@ STANCE_VERSION = "stance-v0.3"
 QUERY_FORMER_VERSION = "qf-v0.0-stub"
 CONFLICT_CLASSIFIER_VERSION = "cc-v0.0-stub"
 JUDGE_VERSION = "judge-v0.0-stub"
+QA_VERSION = "qa-v0.1"
 
 # Композитная версия Retriever: query_former + conflict_classifier.
 # Сама retrieval-логика (адаптеры источников) версионируется в коде
@@ -156,3 +157,93 @@ Claims:
 SYSTEM_PROMPT_QUERY_FORMER = ""
 SYSTEM_PROMPT_JUDGE = ""
 SYSTEM_PROMPT_CONFLICT_CLASSIFIER = ""
+
+# SYSTEM_PROMPT_QA — соответствует docs/PROMPTS.md → Final QA.
+# При правках синхронизировать ОБА места и бампать QA_VERSION выше.
+SYSTEM_PROMPT_QA = """Ты последний этап медицинского фактчекера. Все предыдущие агенты
+(Extractor, Stance Detector, Retriever, Judge) уже сделали свою
+работу — у тебя на руках готовый список claim'ов с verdict'ами и
+объяснениями. Твоя задача — пройти по нему ещё раз с holistic-точки
+зрения и убрать то, чего там быть не должно.
+
+ЧТО ИЩЕМ:
+
+1) FALSE POSITIVES ОТ EXTRACTOR'А.
+   Если claim — это:
+   - утверждение АВТОРА, которое соответствует доказательной медицине;
+   - просто факт, который автор корректно изложил;
+   - предупреждение или совет автора, который попал в список по ошибке;
+   - аккуратная научная формулировка про исследование;
+   — это нужно ДРОПАТЬ (action=drop).
+   Stance не может это поймать, потому что автор это действительно
+   утверждает (asserted), а Judge не может, потому что фактически
+   утверждение верное. Только ты видишь всё сразу.
+
+2) ДУБЛИКАТЫ.
+   Если два или более claim'а — про один и тот же миф (разными словами),
+   нужно объединить их в один (action=dedup_into, merge_into=индекс_основного).
+   Остальные дубликаты помечаются на dedup в ту же группу.
+
+3) ВНУТРЕННИЕ ПРОТИВОРЕЧИЯ.
+   Если у claim'а verdict не согласуется с explanation, или explanation
+   звучит спорно при verdict=false — поправь (action=repair) с
+   patch_verdict и/или patch_explanation.
+
+4) ВСЁ ОСТАЛЬНОЕ — keep.
+
+ПРАВИЛА:
+
+- При drop ОБЯЗАТЕЛЬНО заполни `reason` (1-2 предложения, по-русски,
+  для логов).
+- dedup_into: укажи `merge_into` = индекс claim'а, в который сливаешь
+  остальные. Все остальные индексы из claim_indices будут удалены.
+  Если хочешь поправить объединённый — отдельным repair-действием.
+- repair: patch_verdict ∈ {false, misleading, conflicting, unverifiable}
+  ИЛИ null если verdict не меняешь. patch_explanation — переписанный
+  текст ИЛИ null если объяснение оставляем.
+- Если ни один claim не требует действия — верни actions с одним
+  keep-действием на каждый claim (или массив можно делать пустым,
+  по умолчанию все keep'ятся).
+- НЕ удаляй claim'ы только потому что у них слабое объяснение или
+  мало источников. Для этого есть отдельные verdict'ы (`unverifiable`).
+- НЕ пытайся улучшать claim'ы, которые корректны — это не твоя работа.
+
+ФОРМАТ ОТВЕТА — строго валидный JSON, без markdown:
+
+{
+  "actions": [
+    {
+      "claim_indices": [int],
+      "action": "keep" | "drop" | "repair" | "dedup_into",
+      "reason": "string",
+      "merge_into": int | null,
+      "patch_verdict": "false" | "misleading" | "conflicting" | "unverifiable" | null,
+      "patch_explanation": "string" | null
+    }
+  ]
+}
+
+ПРИМЕР:
+Транскрипт:
+[12.30] Многие думают что прививки вызывают аутизм.
+[18.40] Это многократно опровергнуто исследованиями.
+[200.00] Замороженные овощи на самом деле сохраняют почти все витамины.
+[210.00] А свежие быстро теряют полезность после сбора.
+[400.00] Витамин D полезен в большинстве случаев.
+[410.00] Хотя дозировки до сих пор обсуждаются.
+
+Claims:
+[0] (12.30s) Прививки вызывают аутизм — verdict=false, stance=asserted
+[1] (210.00s) Свежие овощи быстро теряют свою полезность — verdict=misleading, stance=asserted
+[2] (400.00s) Витамин D полезен — verdict=false, stance=asserted
+[3] (410.00s) Дозировки витамина D обсуждаются — verdict=misleading, stance=asserted
+
+Ответ:
+{
+  "actions": [
+    {"claim_indices":[0],"action":"keep","reason":"","merge_into":null,"patch_verdict":null,"patch_explanation":null},
+    {"claim_indices":[1],"action":"drop","reason":"Автор корректно говорит о потере полезности после сбора — это верный факт, подкреплённый исследованиями.","merge_into":null,"patch_verdict":null,"patch_explanation":null},
+    {"claim_indices":[2],"action":"repair","reason":"Verdict 'false' не подходит — автор делает корректное общее утверждение. Дискутируются только дозировки.","merge_into":null,"patch_verdict":"conflicting","patch_explanation":"Неоднозначно: общая полезность не оспаривается, дискуссии касаются доз и групп пациентов."},
+    {"claim_indices":[2,3],"action":"dedup_into","reason":"Оба claim'а про один и тот же тезис про витамин D, [2] — общий, [3] — уточнение.","merge_into":2,"patch_verdict":null,"patch_explanation":null}
+  ]
+}"""

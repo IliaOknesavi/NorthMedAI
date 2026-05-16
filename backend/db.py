@@ -145,6 +145,7 @@ async def save_analysis(
     stance_version: str = "",
     retriever_version: str = "",
     judge_version: str = "",
+    qa_version: str = "",
     debunked_drop_count: int = 0,
 ) -> Analysis:
     """
@@ -170,6 +171,7 @@ async def save_analysis(
         stance_version=stance_version[:32],
         retriever_version=retriever_version[:64],
         judge_version=judge_version[:32],
+        qa_version=qa_version[:32],
         debunked_drop_count=int(debunked_drop_count),
         is_latest=True,
         **agg,
@@ -205,11 +207,11 @@ async def save_analysis(
     log.info(
         "save_analysis: video=%s analysis_id=%d claims=%d "
         "(false=%d, mis=%d, conf=%d, unver=%d, soph=%d) "
-        "stance/retr/judge=%s/%s/%s debunked_dropped=%d",
+        "stance/retr/judge/qa=%s/%s/%s/%s debunked_dropped=%d",
         video_id, analysis.id,
         agg["claims_count"], agg["false_count"], agg["misleading_count"],
         agg["conflicting_count"], agg["unverifiable_count"], agg["sophism_count"],
-        stance_version, retriever_version, judge_version, debunked_drop_count,
+        stance_version, retriever_version, judge_version, qa_version, debunked_drop_count,
     )
     return analysis
 
@@ -226,6 +228,7 @@ def analysis_to_dict(analysis: Analysis) -> dict[str, Any]:
         "stance_version": analysis.stance_version,
         "retriever_version": analysis.retriever_version,
         "judge_version": analysis.judge_version,
+        "qa_version": analysis.qa_version,
         "is_latest": analysis.is_latest,
         "created_at": analysis.created_at.isoformat(),
         "claims_count": analysis.claims_count,

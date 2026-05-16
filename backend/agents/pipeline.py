@@ -24,6 +24,7 @@ import logging
 import time
 from typing import TypedDict
 
+from .final_qa import qa_pass
 from .judge import judge
 from .query_former import make_queries
 from .retriever import retrieve
@@ -42,8 +43,15 @@ class PipelineStats(TypedDict):
     stance_debunked_partially: int
     stance_quoted_neutral: int
     claims_after_drop: int
+    # Сколько финальных claim'ов было ДО QA-прохода (для сравнения)
+    claims_before_qa: int
     final_claims: int
     debunked_drop_count: int
+    # Метрики Final QA
+    qa_kept: int
+    qa_dropped: int
+    qa_repaired: int
+    qa_dedup_merges: int
     unverifiable_count: int
     duration_s: float
 
@@ -78,8 +86,13 @@ async def enrich(
                 stance_debunked_partially=0,
                 stance_quoted_neutral=0,
                 claims_after_drop=0,
+                claims_before_qa=0,
                 final_claims=0,
                 debunked_drop_count=0,
+                qa_kept=0,
+                qa_dropped=0,
+                qa_repaired=0,
+                qa_dedup_merges=0,
                 unverifiable_count=0,
                 duration_s=0.0,
             ),
@@ -136,17 +149,37 @@ async def enrich(
         return_exceptions=True,
     )
 
-    final_claims: list[FinalClaim] = []
+    before_qa: list[FinalClaim] = []
     failed = 0
     for item in final_claims_unordered:
         if isinstance(item, BaseException):
             failed += 1
             log.warning("pipeline: один claim упал в обработке: %s", item)
             continue
-        final_claims.append(item)
+        before_qa.append(item)
 
     # Сохраняем тот же порядок, что у Extractor'а — по таймкоду.
-    final_claims.sort(key=lambda c: c["start"])
+    before_qa.sort(key=lambda c: c["start"])
+
+    # --- Шаг 5: Final QA --------------------------------------------------
+    # Видит всё видео + все final claims сразу. Может дропать, репэйрить,
+    # дедупать. Подробности — docs/RAG_ARCHITECTURE.md §4.6.
+    qa = await qa_pass(snippets, before_qa)
+    final_claims = qa["claims"]
+
+    # Подсчёт действий QA для метрик
+    qa_dropped = sum(
+        len(a["claim_indices"]) for a in qa["actions"] if a["action"] == "drop"
+    )
+    qa_repaired = sum(
+        len(a["claim_indices"]) for a in qa["actions"] if a["action"] == "repair"
+    )
+    qa_dedup_merges = sum(
+        # каждая dedup-группа схлопывает (N-1) дубликатов в один
+        max(0, len(a["claim_indices"]) - 1)
+        for a in qa["actions"]
+        if a["action"] == "dedup_into"
+    )
 
     unverifiable_count = sum(1 for c in final_claims if c["verdict"] == "unverifiable")
     duration = time.monotonic() - t0
@@ -161,20 +194,29 @@ async def enrich(
         stance_debunked_partially=cnt["debunked_partially"],
         stance_quoted_neutral=cnt["quoted_neutral"],
         claims_after_drop=len(survivors),
+        claims_before_qa=len(before_qa),
         final_claims=len(final_claims),
         debunked_drop_count=cnt["debunked_fully"] + cnt["quoted_neutral"],
+        qa_kept=len(final_claims),
+        qa_dropped=qa_dropped,
+        qa_repaired=qa_repaired,
+        qa_dedup_merges=qa_dedup_merges,
         unverifiable_count=unverifiable_count,
         duration_s=round(duration, 3),
     )
 
     log.info(
-        "pipeline: in=%d stance(a=%d,df=%d,dp=%d,qn=%d) → after_drop=%d → final=%d "
+        "pipeline: in=%d stance(a=%d,df=%d,dp=%d,qn=%d) → after_drop=%d → "
+        "judge=%d → QA(kept=%d,drop=%d,repair=%d,dedup=%d) → final=%d "
         "(unverifiable=%d, failed=%d) за %.2fs",
         stats["claims_in"],
         stats["stance_asserted"], stats["stance_debunked_fully"],
         stats["stance_debunked_partially"], stats["stance_quoted_neutral"],
-        stats["claims_after_drop"], stats["final_claims"],
-        stats["unverifiable_count"], failed, stats["duration_s"],
+        stats["claims_after_drop"], stats["claims_before_qa"],
+        stats["qa_kept"], stats["qa_dropped"], stats["qa_repaired"],
+        stats["qa_dedup_merges"],
+        stats["final_claims"], stats["unverifiable_count"],
+        failed, stats["duration_s"],
     )
 
     return PipelineResult(claims=final_claims, stats=stats)

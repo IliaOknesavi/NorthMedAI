@@ -83,6 +83,25 @@ def _patch_stance_to_asserted(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pipeline_mod, "detect_stance", fake_stance)
 
 
+def _patch_qa_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Хелпер: подменяет qa_pass на pass-through (не ходим в YandexGPT).
+    Используется в pipeline-тестах, где QA нас не интересует.
+    """
+
+    async def fake_qa(transcript, claims):
+        return {"claims": list(claims), "actions": [], "errors": []}
+
+    from agents import pipeline as pipeline_mod
+    monkeypatch.setattr(pipeline_mod, "qa_pass", fake_qa)
+
+
+def _patch_pipeline_externals(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Подменяет stance + qa за один вызов — обычный набор для pipeline-тестов."""
+    _patch_stance_to_asserted(monkeypatch)
+    _patch_qa_passthrough(monkeypatch)
+
+
 def test_enrich_empty_input() -> None:
     """Пустой вход не должен падать и не должен звать агентов."""
     result = asyncio.run(enrich([], []))
@@ -93,7 +112,7 @@ def test_enrich_empty_input() -> None:
 
 def test_enrich_happy_path_p0(monkeypatch: pytest.MonkeyPatch) -> None:
     """P0-stub: все claim'ы доходят, stance=asserted, 1 mock-source."""
-    _patch_stance_to_asserted(monkeypatch)
+    _patch_pipeline_externals(monkeypatch)
     result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
 
     assert len(result["claims"]) == 2, "оба claim'а должны пройти"
@@ -138,6 +157,7 @@ def test_debunked_fully_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
     # pipeline.py импортирует функцию по имени — патчим там же
     from agents import pipeline as pipeline_mod
     monkeypatch.setattr(pipeline_mod, "detect_stance", fake_stance)
+    _patch_qa_passthrough(monkeypatch)
 
     result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
 
@@ -163,6 +183,7 @@ def test_quoted_neutral_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
 
     from agents import pipeline as pipeline_mod
     monkeypatch.setattr(pipeline_mod, "detect_stance", fake_stance)
+    _patch_qa_passthrough(monkeypatch)
 
     result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
 
@@ -188,6 +209,7 @@ def test_debunked_drop_count_is_sum(monkeypatch: pytest.MonkeyPatch) -> None:
 
     from agents import pipeline as pipeline_mod
     monkeypatch.setattr(pipeline_mod, "detect_stance", fake_stance)
+    _patch_qa_passthrough(monkeypatch)
 
     result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
 
@@ -212,6 +234,7 @@ def test_debunked_partially_keeps_missing(monkeypatch: pytest.MonkeyPatch) -> No
 
     from agents import pipeline as pipeline_mod
     monkeypatch.setattr(pipeline_mod, "detect_stance", fake_stance)
+    _patch_qa_passthrough(monkeypatch)
 
     result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
 
@@ -227,7 +250,7 @@ def test_pipeline_stats_keys_stable(monkeypatch: pytest.MonkeyPatch) -> None:
     Если этот тест упал — вы поменяли набор полей в PipelineStats. Подумайте,
     не сломает ли это main.py / save_analysis / front-end дашборд.
     """
-    _patch_stance_to_asserted(monkeypatch)
+    _patch_pipeline_externals(monkeypatch)
     result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
     expected_keys = {
         "claims_in",
@@ -236,8 +259,13 @@ def test_pipeline_stats_keys_stable(monkeypatch: pytest.MonkeyPatch) -> None:
         "stance_debunked_partially",
         "stance_quoted_neutral",
         "claims_after_drop",
+        "claims_before_qa",
         "final_claims",
         "debunked_drop_count",
+        "qa_kept",
+        "qa_dropped",
+        "qa_repaired",
+        "qa_dedup_merges",
         "unverifiable_count",
         "duration_s",
     }

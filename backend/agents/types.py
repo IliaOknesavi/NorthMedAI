@@ -142,13 +142,16 @@ class FinalClaim(TypedDict):
     """
     Итоговый claim после всех агентов. Это то, что попадает в БД и
     (после фильтрации `unverifiable`) к пользователю в content_script.
+
+    Final QA может переписать explanation/verdict — но `extractor_verdict`
+    и `judge_notes` остаются неизменными как след истории.
     """
 
     text: str
     start: float
     verdict: FinalVerdict
     type: ClaimType
-    explanation: str        # переписан Judge с учётом источников и stance
+    explanation: str        # переписан Judge или QA с учётом источников и stance
     confidence: float
     sources: list[Source]
 
@@ -161,3 +164,29 @@ class FinalClaim(TypedDict):
     judge_notes: str        # 1-2 фразы, почему Judge решил так
     # Запросы, которые Retriever использовал — для дебага.
     search_queries: QueriesPerSource | None
+
+
+# --- 5. Шаг Final QA → QAAction / QAResult ------------------------------
+
+QAActionType = Literal["keep", "drop", "repair", "dedup_into"]
+
+
+class QAAction(TypedDict, total=False):
+    """Одно действие QA над одним claim'ом или dedup-группой."""
+
+    claim_indices: list[int]    # к каким claim'ам относится действие
+    action: QAActionType
+    reason: str                 # человеко-читаемая причина (для логов)
+    # repair: что подменить в claim'е (если null — оставляем как было)
+    patch_verdict: FinalVerdict | None
+    patch_explanation: str | None
+    # dedup_into: в какой claim сливаем (индекс из claim_indices)
+    merge_into: int | None
+
+
+class QAResult(TypedDict):
+    """Что отдаёт Final QA из своего LLM-вызова."""
+
+    claims: list[FinalClaim]    # после применения всех actions
+    actions: list[QAAction]     # что было решено по каждому claim'у (для логов)
+    errors: list[str]           # пустой если всё прошло гладко
