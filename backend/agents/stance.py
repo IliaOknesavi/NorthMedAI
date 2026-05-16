@@ -38,9 +38,12 @@ log = logging.getLogger("agents.stance")
 # Те же креды, что и у detector.py — Yandex AI Studio один на проект.
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY", "").strip()
 YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID", "").strip()
-# Stance — лёгкая задача классификации. Lite-модель быстрее и дешевле,
-# а на этой задаче не уступает в качестве полной yandexgpt.
-YANDEX_STANCE_MODEL = os.getenv("YANDEX_STANCE_MODEL", "yandexgpt-lite/latest").strip()
+# Stance смотрит на риторическую структуру всего видео — это не такая
+# простая задача, как казалось изначально. Lite-модель на 30K-символьном
+# транскрипте систематически промахивалась (ставила asserted разоблачённым
+# мифам). Полная yandexgpt медленнее на 5-10 секунд, зато читает контекст
+# по-настоящему. Можно переключить через .env (YANDEX_STANCE_MODEL).
+YANDEX_STANCE_MODEL = os.getenv("YANDEX_STANCE_MODEL", "yandexgpt/latest").strip()
 YANDEX_BASE_URL = "https://ai.api.cloud.yandex.net/v1"
 
 MAX_OUTPUT_TOKENS = 2000      # достаточно на 50 stance'ов с описанием
@@ -268,7 +271,11 @@ async def detect_stance(
         return _all_asserted(n)
 
     raw = getattr(response, "output_text", None) or ""
-    log.debug("stance raw response (%d симв.): %s", len(raw), raw[:1500])
+    # На INFO кладём первые 800 симв, чтобы видеть качество ответов в
+    # обычных логах без поднятия уровня. Полный raw идёт в DEBUG.
+    log.info("stance raw (preview %d/%d симв.): %s",
+             min(800, len(raw)), len(raw), raw[:800].replace("\n", " ⏎ "))
+    log.debug("stance full raw response: %s", raw)
 
     data = _extract_json(raw)
     raw_stances = data.get("stances") if isinstance(data, dict) else None
