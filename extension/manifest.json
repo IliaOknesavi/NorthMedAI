@@ -4,9 +4,14 @@
   "version": "0.1.0",
   "description": "AI fact-checker for medical content on YouTube",
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["https://www.youtube.com/*"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://www.youtube.com/youtubei/*",
+    "http://localhost:8000/*"
+  ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
