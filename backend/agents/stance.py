@@ -41,9 +41,10 @@ YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID", "").strip()
 # Stance смотрит на риторическую структуру всего видео — это не такая
 # простая задача, как казалось изначально. Lite-модель на 30K-символьном
 # транскрипте систематически промахивалась (ставила asserted разоблачённым
-# мифам). Полная yandexgpt медленнее на 5-10 секунд, зато читает контекст
-# по-настоящему. Можно переключить через .env (YANDEX_STANCE_MODEL).
-YANDEX_STANCE_MODEL = os.getenv("YANDEX_STANCE_MODEL", "yandexgpt/latest").strip()
+# мифам). yandexgpt-5.1 — самая свежая ветка полной модели в AI Studio
+# (та же, что использует Extractor). Можно переключить через .env
+# (YANDEX_STANCE_MODEL=yandexgpt-pro/latest, если доступна в фолдере).
+YANDEX_STANCE_MODEL = os.getenv("YANDEX_STANCE_MODEL", "yandexgpt-5.1/latest").strip()
 YANDEX_BASE_URL = "https://ai.api.cloud.yandex.net/v1"
 
 MAX_OUTPUT_TOKENS = 2000      # достаточно на 50 stance'ов с описанием

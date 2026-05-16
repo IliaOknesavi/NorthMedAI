@@ -43,18 +43,20 @@ log = logging.getLogger("agents.final_qa")
 
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY", "").strip()
 YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID", "").strip()
-# QA — последний голос, нужна полная модель.
-YANDEX_QA_MODEL = os.getenv("YANDEX_QA_MODEL", "yandexgpt/latest").strip()
+# QA — последний голос, нужна самая сильная модель в AI Studio.
+# yandexgpt-5.1 — свежая ветка полной yandexgpt (та же что у Extractor).
+# Если в фолдере доступна yandexgpt-pro — можно поднять через .env.
+YANDEX_QA_MODEL = os.getenv("YANDEX_QA_MODEL", "yandexgpt-5.1/latest").strip()
 YANDEX_BASE_URL = "https://ai.api.cloud.yandex.net/v1"
 
 MAX_OUTPUT_TOKENS = 3000          # actions могут быть длинными с reason'ами
 TEMPERATURE = 0.0
 REQUEST_TIMEOUT_S = 45.0
-MAX_TRANSCRIPT_CHARS = 30_000
 # Окно локального контекста вокруг каждого claim'а (в секундах).
-# Опыт показал: на полном транскрипте 30K симв. модель не находит, как
-# claim относится к авторской аргументации. Передаём ей готовый кусок.
-CONTEXT_WINDOW_SEC = 90.0
+# С v0.3 мы НЕ передаём полный транскрипт — только эти окна. Поэтому окно
+# взято пошире (раньше было 90), чтобы компенсировать отсутствие глобального
+# обзора и охватить типичный кусок «миф + аргумент» в YouTube-ролике.
+CONTEXT_WINDOW_SEC = 120.0
 
 VALID_ACTIONS: set[str] = {"keep", "drop", "repair", "dedup_into"}
 VALID_VERDICTS: set[str] = {"false", "misleading", "conflicting", "unverifiable"}
@@ -328,18 +330,22 @@ async def qa_pass(
     if n == 0:
         return QAResult(claims=[], actions=[], errors=[])
 
-    transcript_block = _format_transcript(transcript)
+    # v0.3: полный транскрипт больше не передаём — на нём модель тонула
+    # (lost-in-the-middle на 30K симв.). Вместо него у каждого claim'а есть
+    # локальное окно ±CONTEXT_WINDOW_SEC. Цена — dedup-кейсы хуже (модель
+    # не видит claim'ы из других частей видео целиком), но drop/repair —
+    # лучше, потому что reasoning теперь локальный.
     claims_block = _format_claims(final_claims, transcript)
 
     user_prompt = (
-        f"Транскрипт:\n{transcript_block}\n\n"
-        f"Claim'ы для проверки:\n{claims_block}\n\n"
+        f"Claim'ы для проверки (у каждого — локальный кусок транскрипта):\n\n"
+        f"{claims_block}\n\n"
         "Верни строго JSON по описанному формату."
     )
 
     log.info(
-        "QA: вызываю %s, transcript=%d симв., claims=%d",
-        _model_uri(), len(transcript_block), n,
+        "QA: вызываю %s, claims=%d, prompt=%d симв. (без full transcript)",
+        _model_uri(), n, len(claims_block),
     )
 
     try:
