@@ -3,20 +3,18 @@
   "name": "NorthMedAI",
   "version": "0.1.0",
   "description": "AI fact-checker for medical content on YouTube",
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "storage", "tabs"],
   "host_permissions": [
-    "https://www.youtube.com/*",
-    "https://www.youtube.com/youtubei/*",
     "http://localhost:8000/*"
   ],
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/*"],
-      "js": ["content_script.js"]
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["content_script.js"],
+      "run_at": "document_idle"
     }
   ],
   "action": {
