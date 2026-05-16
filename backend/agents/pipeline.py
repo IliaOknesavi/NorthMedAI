@@ -106,13 +106,18 @@ async def enrich(
     for s in stances:
         cnt[s["stance"]] = cnt.get(s["stance"], 0) + 1
 
-    # --- Drop: claim'ы со stance="debunked_fully" не идут дальше ----------
+    # --- Drop: claim'ы с stance, которые не должны идти в overlay --------
+    # Дропаем И debunked_fully (автор сам разоблачил), И quoted_neutral
+    # (автор цитирует чужую позицию — пользователю не нужно «исправлять»
+    # автора, который и так нейтрально передал чужой тезис).
+    # См. docs/RAG_ARCHITECTURE.md §4.1.5.
+    DROP_STANCES = {"debunked_fully", "quoted_neutral"}
     survivors: list[tuple[RawClaim, "StanceLabel"]] = []  # type: ignore[name-defined]
     for raw, s in zip(raw_claims, stances):
-        if s["stance"] == "debunked_fully":
+        if s["stance"] in DROP_STANCES:
             log.info(
-                "pipeline: drop claim @ %.1fs (автор разобрал полностью): %r",
-                raw["start"], raw["text"][:80],
+                "pipeline: drop claim @ %.1fs (stance=%s): %r",
+                raw["start"], s["stance"], raw["text"][:80],
             )
             continue
         survivors.append((raw, s))
@@ -146,6 +151,9 @@ async def enrich(
     unverifiable_count = sum(1 for c in final_claims if c["verdict"] == "unverifiable")
     duration = time.monotonic() - t0
 
+    # debunked_drop_count теперь сумма всех stance, которые мы дропаем
+    # (debunked_fully + quoted_neutral). Раздельные счётчики живут в
+    # stance_* полях для дебага и /history.
     stats = PipelineStats(
         claims_in=n_in,
         stance_asserted=cnt["asserted"],
@@ -154,7 +162,7 @@ async def enrich(
         stance_quoted_neutral=cnt["quoted_neutral"],
         claims_after_drop=len(survivors),
         final_claims=len(final_claims),
-        debunked_drop_count=cnt["debunked_fully"],
+        debunked_drop_count=cnt["debunked_fully"] + cnt["quoted_neutral"],
         unverifiable_count=unverifiable_count,
         duration_s=round(duration, 3),
     )

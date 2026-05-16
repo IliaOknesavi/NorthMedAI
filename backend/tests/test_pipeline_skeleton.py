@@ -152,6 +152,52 @@ def test_debunked_fully_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
     assert stats["final_claims"] == 1
 
 
+def test_quoted_neutral_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """quoted_neutral — автор цитирует чужое мнение, в оверлей не идёт."""
+
+    async def fake_stance(transcript, claims):
+        return [
+            StanceLabel(claim_index=0, stance="quoted_neutral", missing="", confidence=0.8),
+            StanceLabel(claim_index=1, stance="asserted", missing="", confidence=0.7),
+        ]
+
+    from agents import pipeline as pipeline_mod
+    monkeypatch.setattr(pipeline_mod, "detect_stance", fake_stance)
+
+    result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
+
+    assert len(result["claims"]) == 1, "quoted_neutral должен быть отфильтрован"
+    assert result["claims"][0]["stance"] == "asserted"
+
+    stats = result["stats"]
+    assert stats["stance_quoted_neutral"] == 1
+    assert stats["stance_debunked_fully"] == 0
+    # debunked_drop_count — это сумма debunked_fully + quoted_neutral
+    assert stats["debunked_drop_count"] == 1
+    assert stats["claims_after_drop"] == 1
+
+
+def test_debunked_drop_count_is_sum(monkeypatch: pytest.MonkeyPatch) -> None:
+    """debunked_drop_count — суммарный, как агрегатная метрика всех дропов на stance."""
+
+    async def fake_stance(transcript, claims):
+        return [
+            StanceLabel(claim_index=0, stance="debunked_fully", missing="", confidence=0.9),
+            StanceLabel(claim_index=1, stance="quoted_neutral", missing="", confidence=0.7),
+        ]
+
+    from agents import pipeline as pipeline_mod
+    monkeypatch.setattr(pipeline_mod, "detect_stance", fake_stance)
+
+    result = asyncio.run(enrich(_make_snippets(), _make_raw_claims()))
+
+    assert len(result["claims"]) == 0
+    stats = result["stats"]
+    assert stats["stance_debunked_fully"] == 1
+    assert stats["stance_quoted_neutral"] == 1
+    assert stats["debunked_drop_count"] == 2
+
+
 def test_debunked_partially_keeps_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """debunked_partially проходит дальше, stance_missing сохраняется."""
 

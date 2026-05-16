@@ -40,7 +40,7 @@ from youtube_transcript_api import NoTranscriptFound, TranscriptsDisabled
 
 log = logging.getLogger("backend.main")
 
-DETECTOR_VERSION = "v2-strict-prompt"
+DETECTOR_VERSION = "v3-no-self-warnings"
 
 # Блокируем параллельные /analyze для одного и того же video_id.
 # Если расширение успело отправить второй запрос, пока первый ещё считает

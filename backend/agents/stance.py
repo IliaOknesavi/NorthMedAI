@@ -245,8 +245,8 @@ async def detect_stance(
     )
 
     log.info(
-        "stance: вызываю YandexGPT-lite, transcript=%d симв., claims=%d, model=%s",
-        len(transcript_block), n, _model_uri(),
+        "stance: вызываю %s, transcript=%d симв., claims=%d",
+        _model_uri(), len(transcript_block), n,
     )
 
     try:
