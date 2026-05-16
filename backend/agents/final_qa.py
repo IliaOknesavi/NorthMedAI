@@ -51,6 +51,10 @@ MAX_OUTPUT_TOKENS = 3000          # actions могут быть длинными
 TEMPERATURE = 0.0
 REQUEST_TIMEOUT_S = 45.0
 MAX_TRANSCRIPT_CHARS = 30_000
+# Окно локального контекста вокруг каждого claim'а (в секундах).
+# Опыт показал: на полном транскрипте 30K симв. модель не находит, как
+# claim относится к авторской аргументации. Передаём ей готовый кусок.
+CONTEXT_WINDOW_SEC = 90.0
 
 VALID_ACTIONS: set[str] = {"keep", "drop", "repair", "dedup_into"}
 VALID_VERDICTS: set[str] = {"false", "misleading", "conflicting", "unverifiable"}
@@ -101,16 +105,40 @@ def _format_transcript(snippets: list[Snippet]) -> str:
     return "\n".join(lines)
 
 
-def _format_claims(claims: list[FinalClaim]) -> str:
+def _local_context(snippets: list[Snippet], claim_start: float, window: float = CONTEXT_WINDOW_SEC) -> str:
+    """
+    Кусок транскрипта ±`window` секунд вокруг таймкода claim'а.
+    Это даёт QA конкретный контекст: что автор говорит ДО и ПОСЛЕ claim'а.
+
+    Если бы мы полагались на полный транскрипт, QA приходилось бы вылавливать
+    нужное место среди 30K символов — на практике он этого не делает.
+    """
+    low, high = claim_start - window, claim_start + window
+    lines: list[str] = []
+    for s in snippets:
+        start = float(s.get("start", 0.0))
+        if start < low or start > high:
+            continue
+        text = (s.get("text") or "").replace("\n", " ").strip()
+        if not text:
+            continue
+        marker = "  →" if abs(start - claim_start) < 1.0 else "   "
+        lines.append(f"{marker} [{start:.2f}] {text}")
+    return "\n".join(lines) if lines else "   (нет сниппетов в окне)"
+
+
+def _format_claims(claims: list[FinalClaim], snippets: list[Snippet]) -> str:
     out: list[str] = []
     for i, c in enumerate(claims):
+        ctx = _local_context(snippets, float(c["start"]))
         out.append(
             f"[{i}] ({float(c['start']):.2f}s) {c['text']}\n"
             f"  verdict={c['verdict']}, type={c['type']}, "
             f"stance={c['stance']}, sources={len(c.get('sources', []))}\n"
-            f"  explanation: {c.get('explanation', '')}"
+            f"  explanation: {c.get('explanation', '')}\n"
+            f"  локальный контекст (±{CONTEXT_WINDOW_SEC:.0f}s вокруг таймкода):\n{ctx}"
         )
-    return "\n".join(out)
+    return "\n\n".join(out)
 
 
 # --- Парсинг ответа ------------------------------------------------------
@@ -301,7 +329,7 @@ async def qa_pass(
         return QAResult(claims=[], actions=[], errors=[])
 
     transcript_block = _format_transcript(transcript)
-    claims_block = _format_claims(final_claims)
+    claims_block = _format_claims(final_claims, transcript)
 
     user_prompt = (
         f"Транскрипт:\n{transcript_block}\n\n"
