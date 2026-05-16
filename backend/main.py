@@ -28,6 +28,11 @@ from db import (
     save_analysis,
     upsert_video_transcript,
 )
+from agents.prompts import (
+    JUDGE_VERSION,
+    RETRIEVER_VERSION,
+    STANCE_VERSION,
+)
 from detector import YANDEX_GPT_MODEL, analyze_claims
 from models import Video
 from transcript import extract_video_id, get_transcript
@@ -134,6 +139,16 @@ async def _fetch_transcript_or_4xx(video_id: str) -> list[dict]:
         raise HTTPException(status_code=500, detail=f"Субтитры недоступны: {e}")
 
 
+def _filter_for_overlay(claims: list[dict]) -> list[dict]:
+    """
+    Что доходит до content_script.js:
+    - убираем verdict='unverifiable' — судья не уверен, пользователю не показываем
+      (но claim сохранён в БД и виден в /video/{id}/history для дебага).
+    См. docs/RAG_ARCHITECTURE.md §4.5.
+    """
+    return [c for c in claims if c.get("verdict") != "unverifiable"]
+
+
 def _payload_from_analysis(
     *, video_id: str, analysis_dict: dict, transcript_preview: list, transcript_total: int, cached: bool
 ) -> dict:
@@ -145,7 +160,7 @@ def _payload_from_analysis(
         "model": analysis_dict["model"],
         "transcript_snippets": transcript_total,
         "transcript_preview": transcript_preview,
-        "claims": analysis_dict["claims"],
+        "claims": _filter_for_overlay(analysis_dict["claims"]),
     }
 
 
@@ -298,13 +313,16 @@ async def _run_fresh_analysis(session: AsyncSession, video_id: str) -> dict:
     await upsert_video_transcript(session, video_id=video_id, transcript=snippets)
 
     try:
-        claims = await analyze_claims(snippets)
+        analysis_result = await analyze_claims(snippets)
     except RuntimeError as e:
         log.error("detector конфиг: %s", e)
-        claims = []
+        analysis_result = {"claims": [], "stats": None}
     except Exception:
         log.exception("detector упал, отдаю пустые claims")
-        claims = []
+        analysis_result = {"claims": [], "stats": None}
+
+    claims = analysis_result["claims"]
+    stats = analysis_result["stats"]
 
     analysis = await save_analysis(
         session,
@@ -312,6 +330,10 @@ async def _run_fresh_analysis(session: AsyncSession, video_id: str) -> dict:
         claims=claims,
         model=YANDEX_GPT_MODEL,
         detector_version=DETECTOR_VERSION,
+        stance_version=STANCE_VERSION,
+        retriever_version=RETRIEVER_VERSION,
+        judge_version=JUDGE_VERSION,
+        debunked_drop_count=(stats["debunked_drop_count"] if stats else 0),
     )
 
     return _payload_from_analysis(
