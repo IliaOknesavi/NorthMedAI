@@ -1,8 +1,21 @@
 # RAG и архитектура агентов — NorthMedAI
 
-Версия: 0.1 (дизайн-док, код ещё не написан)
-Дата: 2026-05-16
-Статус: на ревью
+Версия: 0.2 (P0+P1 написаны, на хакатоне)
+Дата: 2026-05-17
+Статус: соответствует main как baseline; feature/rag-pipeline на ревью
+
+> **Что реально сделано к этому моменту:**
+> - P0 (скелет агентов, БД-миграции, pipeline.enrich) — done.
+> - P1.1 PubMed end-to-end (Query Former / NCBI E-utilities / Conflict
+>   Classifier / Judge) — done.
+> - P1.2 Yandex Search whitelist + WHO/CDC/Minzdrav/news adapters +
+>   PDF parsing — done. Без YANDEX_SEARCH_API_KEY возвращают [].
+> - P1.3 Локальный RAG: pgvector расширение, corpus_chunks table,
+>   corpus_ingest CLI, CorpusAdapter — done. Без pgvector image
+>   миграция M0003 пропускается с warning.
+> - Stance Detector — v0.3 (полная yandexgpt, drop quoted_neutral
+>   и debunked_fully).
+> - Final QA — v0.3 (full yandexgpt, локальные окна ±120s, drop+repair+dedup).
 
 Документ описывает, как из текущего «detector → placeholder sources»
 сделать настоящий fact-check pipeline с доказательной базой. Скоупом этого
