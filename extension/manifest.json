@@ -3,7 +3,7 @@
   "name": "NorthMedAI",
   "version": "0.1.0",
   "description": "AI fact-checker for medical content on YouTube",
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "tabs"],
   "host_permissions": [
     "http://localhost:8000/*"
   ],
