@@ -31,7 +31,17 @@ load_dotenv()
 log = logging.getLogger("agents.sources.yandex_search")
 
 
-YANDEX_SEARCH_API_KEY = os.getenv("YANDEX_SEARCH_API_KEY", "").strip()
+# В Yandex Cloud один API key работает для всех сервисов AI Studio
+# (YandexGPT + Embeddings + Search API), если у Service Account есть
+# соответствующие роли. Поэтому если YANDEX_SEARCH_API_KEY не задан
+# отдельно — fallback на основной YANDEX_API_KEY, который уже точно
+# есть в .env (без него YandexGPT не работал бы). Если у Service Account
+# нет роли search-api.executor — Yandex Search вернёт 401, и в логах
+# увидим warning.
+YANDEX_SEARCH_API_KEY = (
+    os.getenv("YANDEX_SEARCH_API_KEY", "").strip()
+    or os.getenv("YANDEX_API_KEY", "").strip()
+)
 # Yandex Search хочет folder_id; используем тот же, что у YandexGPT
 YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID", "").strip()
 
@@ -137,7 +147,7 @@ async def search(
     """
     if not is_configured():
         log.warning(
-            "yandex_search: YANDEX_SEARCH_API_KEY не задан в .env — fallback на []",
+            "yandex_search: ни YANDEX_SEARCH_API_KEY, ни YANDEX_API_KEY не заданы — fallback на []",
         )
         return []
 

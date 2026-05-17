@@ -26,8 +26,10 @@ log = logging.getLogger("agents.sources.whitelist")
 
 
 # Сколько URL'ов реально скачиваем под PDF — отсекаем по топу выдачи,
-# чтобы не качать 50 PDF за один claim.
-MAX_PDFS_TO_FETCH = 2
+# чтобы не качать 50 PDF за один claim. Увеличили до 3 — это основной
+# RAG-путь системы: Yandex Search находит PDF в whitelist'е → мы качаем
+# и парсим первые 2 страницы pdfplumber'ом → snippet идёт в Judge.
+MAX_PDFS_TO_FETCH = 3
 
 
 class WhitelistAdapter:
@@ -61,7 +63,12 @@ class WhitelistAdapter:
 
         pdf_snippets: dict[int, str] = {}
         if pdf_indices:
-            log.info("%s adapter: качаю %d PDF для парсинга", self.tier, len(pdf_indices))
+            pdf_urls = [items[i]["url"] for i in pdf_indices]
+            log.info(
+                "%s adapter: качаю %d PDF (on-demand RAG): %s",
+                self.tier, len(pdf_urls),
+                ", ".join(u.rsplit("/", 1)[-1][:60] for u in pdf_urls),
+            )
             snippets = await asyncio.gather(
                 *(fetch_pdf_snippet(items[i]["url"]) for i in pdf_indices),
                 return_exceptions=False,
@@ -69,6 +76,15 @@ class WhitelistAdapter:
             for i, snippet in zip(pdf_indices, snippets):
                 if snippet:
                     pdf_snippets[i] = snippet
+                    log.info(
+                        "%s adapter: PDF распарсен %s → %d симв.",
+                        self.tier, items[i]["url"], len(snippet),
+                    )
+                else:
+                    log.warning(
+                        "%s adapter: PDF не удалось распарсить: %s",
+                        self.tier, items[i]["url"],
+                    )
 
         # Готовим Source'ы
         out: list[Source] = []
