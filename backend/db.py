@@ -147,6 +147,7 @@ async def save_analysis(
     judge_version: str = "",
     qa_version: str = "",
     debunked_drop_count: int = 0,
+    pipeline_stats: dict | None = None,
 ) -> Analysis:
     """
     Добавляет новую версию анализа. Снимает is_latest со старых версий и
@@ -173,6 +174,7 @@ async def save_analysis(
         judge_version=judge_version[:32],
         qa_version=qa_version[:32],
         debunked_drop_count=int(debunked_drop_count),
+        pipeline_stats=pipeline_stats,
         is_latest=True,
         **agg,
     )
@@ -238,6 +240,7 @@ def analysis_to_dict(analysis: Analysis) -> dict[str, Any]:
         "unverifiable_count": analysis.unverifiable_count,
         "sophism_count": analysis.sophism_count,
         "debunked_drop_count": analysis.debunked_drop_count,
+        "pipeline_stats": analysis.pipeline_stats,
         "claims": [claim_to_dict(c) for c in analysis.claims],
     }
 

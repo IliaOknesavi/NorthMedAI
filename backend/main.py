@@ -179,6 +179,26 @@ def _payload_from_analysis(
         "transcript_snippets": transcript_total,
         "transcript_preview": transcript_preview,
         "claims": _filter_for_overlay(analysis_dict["claims"]),
+        # Метаданные pipeline для UI-попапа: версии агентов, статистика
+        # и счётчики verdict'ов. Не используются content_script'ом, но
+        # popup.js рисует из них «Pipeline» секцию.
+        "pipeline_stats": analysis_dict.get("pipeline_stats"),
+        "versions": {
+            "detector": analysis_dict.get("detector_version") or "",
+            "stance":   analysis_dict.get("stance_version")   or "",
+            "retriever": analysis_dict.get("retriever_version") or "",
+            "judge":    analysis_dict.get("judge_version")    or "",
+            "qa":       analysis_dict.get("qa_version")       or "",
+        },
+        "counts": {
+            "claims":       analysis_dict.get("claims_count", 0),
+            "false":        analysis_dict.get("false_count", 0),
+            "misleading":   analysis_dict.get("misleading_count", 0),
+            "conflicting":  analysis_dict.get("conflicting_count", 0),
+            "unverifiable": analysis_dict.get("unverifiable_count", 0),
+            "sophism":      analysis_dict.get("sophism_count", 0),
+            "debunked_dropped": analysis_dict.get("debunked_drop_count", 0),
+        },
     }
 
 
@@ -374,6 +394,7 @@ async def _run_fresh_analysis(session: AsyncSession, video_id: str) -> dict:
         judge_version=JUDGE_VERSION,
         qa_version=QA_VERSION,
         debunked_drop_count=(stats["debunked_drop_count"] if stats else 0),
+        pipeline_stats=stats,
     )
 
     return _payload_from_analysis(

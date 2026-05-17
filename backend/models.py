@@ -90,6 +90,10 @@ class Analysis(Base):
     debunked_drop_count: Mapped[int] = mapped_column(Integer, default=0)
     # Сколько Judge оставил без вердикта (источников не нашлось).
     unverifiable_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Полный PipelineStats как JSON — для UI-попапа «Pipeline»:
+    # qa_*, stance_*, claims_after_drop, duration_s и т.д.
+    # См. agents/pipeline.py → PipelineStats.
+    pipeline_stats: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

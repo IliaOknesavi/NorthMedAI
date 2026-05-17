@@ -125,6 +125,17 @@ MIGRATIONS: list[tuple[str, str, bool]] = [
         """,
         True,
     ),
+    # M0005 — pipeline_stats JSONB. В нём лежат метрики прогона
+    # (qa_kept/dropped/repaired/dedup, stance_*, duration_s).
+    # Используется UI-попапом для «Pipeline» секции (воронка + время).
+    (
+        "M0005_analyses_pipeline_stats",
+        """
+        ALTER TABLE analyses
+          ADD COLUMN IF NOT EXISTS pipeline_stats JSONB DEFAULT NULL;
+        """,
+        False,
+    ),
 ]
 
 

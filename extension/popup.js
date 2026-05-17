@@ -203,6 +203,7 @@ function handleResponse(resp) {
   const data = resp.data ?? {};
   const claims = data.claims ?? [];
   showCounts(claims);
+  showPipeline(data);
 
   const ttl = window.NMAI_I18N.t(currentLang, "auto_on_title");
   const cnt = window.NMAI_I18N.claimsCount(currentLang, claims.length);
@@ -218,6 +219,85 @@ function handleResponse(resp) {
 
   pushOverlayToTab(claims);
 }
+
+// ─── Pipeline-секция: воронка + версии агентов ──────────────────────────
+// Рендерится из payload'а /analyze /reanalyze /video — там лежит
+// pipeline_stats (JSONB из БД) и versions (из бэкенда).
+function showPipeline(data) {
+  const card = document.getElementById("pipeline-card");
+  if (!card) return;
+  const stats = data.pipeline_stats;
+  const versions = data.versions || {};
+  const counts = data.counts || {};
+
+  // Если у этой записи нет stats (старый кэш до миграции M0005) —
+  // секция скрыта. Чтобы посмотреть, можно сделать /reanalyze.
+  if (!stats) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+
+  // Время в шапке
+  const timeEl = document.getElementById("pipeline-time");
+  if (timeEl) {
+    const d = stats.duration_s;
+    timeEl.textContent = (typeof d === "number") ? `${d.toFixed(1)} с` : "";
+  }
+
+  const funnel = document.getElementById("pipeline-funnel");
+  if (funnel) {
+    const inN = stats.claims_in ?? 0;
+    const afterStance = stats.claims_after_drop ?? inN;
+    const beforeQA = stats.claims_before_qa ?? afterStance;
+    const finalN = stats.final_claims ?? 0;
+    const stanceDropped = (stats.stance_debunked_fully ?? 0) + (stats.stance_quoted_neutral ?? 0);
+    const qaDropped = stats.qa_dropped ?? 0;
+    const qaRepaired = stats.qa_repaired ?? 0;
+    const qaDedup = stats.qa_dedup_merges ?? 0;
+
+    const denom = Math.max(inN, 1);
+    const rows = [
+      { name: "Extractor",  val: inN,       drop: false },
+      { name: "Stance drop",val: stanceDropped, drop: true,
+        hint: "автор сам разобрал или цитировал нейтрально" },
+      { name: "После Stance", val: afterStance, drop: false },
+      { name: "После Judge",  val: beforeQA, drop: false },
+      { name: "QA drop",      val: qaDropped, drop: true,
+        hint: "QA отбросил как верный факт автора" },
+      { name: "QA repair",    val: qaRepaired, drop: true,
+        hint: "QA поправил verdict или explanation" },
+      { name: "QA dedup",     val: qaDedup, drop: true,
+        hint: "QA схлопнул дубликаты" },
+      { name: "В оверлей",    val: finalN, drop: false },
+    ];
+
+    funnel.innerHTML = rows.map(r => {
+      const pct = Math.min(100, Math.round((r.val / denom) * 100));
+      return `
+        <div class="pipeline-stage ${r.drop ? "drop" : ""}" title="${r.hint || ""}">
+          <span class="stage-name">${r.name}</span>
+          <span class="stage-bar"><span style="width:${pct}%"></span></span>
+          <span class="stage-value">${r.val}</span>
+        </div>`;
+    }).join("");
+  }
+
+  const vEl = document.getElementById("pipeline-versions");
+  if (vEl) {
+    const items = [
+      ["Detector", versions.detector],
+      ["Stance",   versions.stance],
+      ["Retriever", versions.retriever],
+      ["Judge",    versions.judge],
+      ["QA",       versions.qa],
+    ].filter(([, v]) => v);
+    vEl.innerHTML = items.map(([name, v]) =>
+      `<span class="ver-badge"><b>${name}</b>${v}</span>`
+    ).join("");
+  }
+}
+
 
 function showCounts(claims) {
   const f = claims.filter(c => c.verdict === "false").length;

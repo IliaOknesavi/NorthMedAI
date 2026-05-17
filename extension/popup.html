@@ -157,6 +157,101 @@
     }
     .tile.zero .tile-value { color: var(--muted-2); font-weight: 600; }
 
+    /* ─── Pipeline card ──────────────────────────────────────────────────── */
+    .pipeline-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .pipeline-card[open] .pipeline-caret { transform: rotate(180deg); }
+
+    .pipeline-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+    .pipeline-summary::-webkit-details-marker { display: none; }
+    .pipeline-title {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: 0.2px;
+    }
+    .pipeline-time {
+      font-size: 11px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .pipeline-caret {
+      font-size: 11px;
+      color: var(--muted);
+      transition: transform 0.2s;
+    }
+
+    .pipeline-body {
+      padding: 8px 14px 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .pipeline-funnel { display: flex; flex-direction: column; gap: 4px; }
+    .pipeline-stage {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text);
+      padding: 4px 0;
+    }
+    .pipeline-stage .stage-name { flex: 1; color: var(--muted); }
+    .pipeline-stage .stage-value {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+    }
+    .pipeline-stage .stage-bar {
+      flex: 0 0 60px;
+      height: 4px;
+      background: var(--surface-2);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .pipeline-stage .stage-bar > span {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, #4f8ef7, #66d9b1);
+      border-radius: 2px;
+    }
+    .pipeline-stage.drop .stage-value { color: var(--muted); }
+    .pipeline-stage.drop .stage-bar > span { background: rgba(255,255,255,0.12); }
+
+    .pipeline-versions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--border);
+    }
+    .pipeline-versions .ver-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--surface-2);
+      color: var(--muted);
+      letter-spacing: 0.2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .pipeline-versions .ver-badge b {
+      color: var(--text);
+      margin-right: 4px;
+      font-weight: 600;
+    }
+
     /* ─── Toggles section ────────────────────────────────────────────────── */
     .toggles {
       background: var(--surface);
@@ -330,6 +425,23 @@
             <div class="tile-value" id="count-sophism">0</div>
           </div>
         </div>
+
+        <!-- Pipeline: воронка прогресса агентов + время + версии -->
+        <details id="pipeline-card" class="pipeline-card" hidden>
+          <summary class="pipeline-summary">
+            <span class="pipeline-title">Pipeline</span>
+            <span class="pipeline-time" id="pipeline-time"></span>
+            <span class="pipeline-caret">▾</span>
+          </summary>
+          <div class="pipeline-body">
+            <div class="pipeline-funnel" id="pipeline-funnel">
+              <!-- этапы добавит popup.js -->
+            </div>
+            <div class="pipeline-versions" id="pipeline-versions">
+              <!-- бейджи версий агентов от popup.js -->
+            </div>
+          </div>
+        </details>
 
         <!-- Тумблеры -->
         <div class="toggles">
