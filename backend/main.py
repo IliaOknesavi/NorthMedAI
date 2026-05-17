@@ -13,6 +13,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +38,7 @@ from agents.prompts import (
 from detector import YANDEX_GPT_MODEL, analyze_claims
 from models import Video
 from transcript import extract_video_id, get_transcript
+from tts import synthesize as tts_synthesize
 from youtube_transcript_api import NoTranscriptFound, TranscriptsDisabled
 
 log = logging.getLogger("backend.main")
@@ -96,6 +98,11 @@ async def get_session() -> AsyncSession:
 
 class AnalyzeRequest(BaseModel):
     video_id: str  # YouTube video ID или полный URL
+
+
+class TTSRequest(BaseModel):
+    text: str
+    voice: str | None = None
 
 
 class AnalyzeResponse(BaseModel):
@@ -180,6 +187,27 @@ def _payload_from_analysis(
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.post("/tts")
+async def tts_endpoint(req: TTSRequest) -> Response:
+    """
+    Синтез речи через Yandex SpeechKit. Возвращает audio/mp3.
+
+    Используется extension/content_script.js — в конце окна показа метки
+    (если включён тумблер nmai_voice) расширение ставит pause(), дёргает
+    этот эндпоинт с explanation, играет mp3 через <audio>, на ended
+    возобновляет play() видео.
+    """
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text обязателен")
+    audio = await tts_synthesize(text, voice=req.voice)
+    if audio is None:
+        # SpeechKit отвалился или нет credentials — клиент пусть
+        # просто не озвучивает (расширение это переживёт).
+        raise HTTPException(status_code=503, detail="TTS недоступен")
+    return Response(content=audio, media_type="audio/mpeg")
 
 
 @app.get("/video/{video_id}")

@@ -275,11 +275,14 @@ els.ticksToggle.addEventListener("change", async () => {
   }
 });
 
-// ─── Listeners: voice (заглушка) ─────────────────────────────────────────
+// ─── Listeners: voice ────────────────────────────────────────────────────
+// При активном тумблере content_script в конце окна показа метки ставит
+// паузу видео, дёргает /tts на бэкенде и проигрывает explanation через
+// <audio>. См. extension/content_script.js → speakExplanation().
 
 els.voiceToggle.addEventListener("change", async () => {
   await chrome.storage.sync.set({ [STORAGE.voice]: els.voiceToggle.checked });
-  console.log("[NMAI] voice toggle changed — фича пока не реализована");
+  console.log("[NMAI] voice toggle:", els.voiceToggle.checked);
 });
 
 // ─── Listeners: re-check ─────────────────────────────────────────────────
