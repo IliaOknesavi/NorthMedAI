@@ -2,11 +2,18 @@ fastapi
 uvicorn[standard]
 youtube-transcript-api
 openai>=1.40.0
-langchain
-langchain-community
-faiss-cpu
 python-dotenv
 httpx
 sqlalchemy>=2.0
 asyncpg
 greenlet
+
+# Парсинг PDF для WHO/Minzdrav адаптеров и corpus_ingest CLI
+pdfplumber
+
+# pgvector wrapper для локального RAG (P1.3).
+# Requires pgvector расширение в Postgres (см. docker-compose.yml).
+pgvector
+
+# Тестирование (опционально, не для прода)
+pytest

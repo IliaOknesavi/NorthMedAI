@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import selectinload
 
+from migrations import apply_inplace_migrations
 from models import Analysis, Base, Claim, Video
 
 load_dotenv()
@@ -46,9 +47,16 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
 async def init_db() -> None:
-    """Создаёт таблицы при первом запуске. Идемпотентно."""
+    """Создаёт таблицы при первом запуске и накатывает in-place миграции.
+    Идемпотентно — безопасно вызывать на каждом старте.
+    """
+    # 1) на чистой БД — создаём таблицы со всеми колонками из models.py.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # 2) миграции для существующей БД. Изолированы в своих транзакциях —
+    # см. apply_inplace_migrations: optional-миграции (pgvector) могут упасть,
+    # но это не отравит транзакцию для последующих обязательных миграций.
+    await apply_inplace_migrations(engine)
     log.info("init_db: схема готова (%s)", _safe_url())
 
 
@@ -96,6 +104,7 @@ def _aggregate(claims: list[dict]) -> dict[str, int]:
         "false_count": sum(1 for c in claims if c.get("verdict") == "false"),
         "misleading_count": sum(1 for c in claims if c.get("verdict") == "misleading"),
         "conflicting_count": sum(1 for c in claims if c.get("verdict") == "conflicting"),
+        "unverifiable_count": sum(1 for c in claims if c.get("verdict") == "unverifiable"),
         "sophism_count": sum(1 for c in claims if c.get("type") == "sophism"),
     }
 
@@ -135,10 +144,20 @@ async def save_analysis(
     claims: list[dict],
     model: str = "",
     detector_version: str = "",
+    stance_version: str = "",
+    retriever_version: str = "",
+    judge_version: str = "",
+    qa_version: str = "",
+    debunked_drop_count: int = 0,
+    pipeline_stats: dict | None = None,
 ) -> Analysis:
     """
     Добавляет новую версию анализа. Снимает is_latest со старых версий и
     проставляет True для новой.
+
+    Все *_version поля идут отдельно, чтобы при апгрейде промптов мы могли
+    в /video/{id}/history увидеть точно, какая версия каждого агента
+    рожала каждую запись.
     """
     # Со старых снимаем флаг — но не удаляем
     await session.execute(
@@ -152,6 +171,12 @@ async def save_analysis(
         video_id=video_id,
         model=model[:128],
         detector_version=detector_version[:32],
+        stance_version=stance_version[:32],
+        retriever_version=retriever_version[:64],
+        judge_version=judge_version[:32],
+        qa_version=qa_version[:32],
+        debunked_drop_count=int(debunked_drop_count),
+        pipeline_stats=pipeline_stats,
         is_latest=True,
         **agg,
     )
@@ -169,6 +194,13 @@ async def save_analysis(
                 explanation=str(c.get("explanation", ""))[:4000],
                 confidence=float(c.get("confidence", 0.0)),
                 sources=c.get("sources") or None,
+                # Аудит-поля от агентов (см. agents/types.py FinalClaim).
+                # Защищаемся от старых вызовов: если ключа нет — дефолт.
+                extractor_verdict=str(c.get("extractor_verdict", ""))[:32],
+                stance=str(c.get("stance", "asserted"))[:32],
+                stance_missing=str(c.get("stance_missing", ""))[:4000],
+                judge_notes=str(c.get("judge_notes", ""))[:4000],
+                search_queries=c.get("search_queries") or None,
             )
         )
     await session.flush()
@@ -177,10 +209,13 @@ async def save_analysis(
     # дотянуть и упадёт с MissingGreenlet (мы в async-сессии).
     await session.refresh(analysis, attribute_names=["claims"])
     log.info(
-        "save_analysis: video=%s analysis_id=%d claims=%d (false=%d, mis=%d, conf=%d, soph=%d)",
+        "save_analysis: video=%s analysis_id=%d claims=%d "
+        "(false=%d, mis=%d, conf=%d, unver=%d, soph=%d) "
+        "stance/retr/judge/qa=%s/%s/%s/%s debunked_dropped=%d",
         video_id, analysis.id,
         agg["claims_count"], agg["false_count"], agg["misleading_count"],
-        agg["conflicting_count"], agg["sophism_count"],
+        agg["conflicting_count"], agg["unverifiable_count"], agg["sophism_count"],
+        stance_version, retriever_version, judge_version, qa_version, debunked_drop_count,
     )
     return analysis
 
@@ -194,18 +229,36 @@ def analysis_to_dict(analysis: Analysis) -> dict[str, Any]:
         "video_id": analysis.video_id,
         "model": analysis.model,
         "detector_version": analysis.detector_version,
+        "stance_version": analysis.stance_version,
+        "retriever_version": analysis.retriever_version,
+        "judge_version": analysis.judge_version,
+        "qa_version": analysis.qa_version,
         "is_latest": analysis.is_latest,
         "created_at": analysis.created_at.isoformat(),
         "claims_count": analysis.claims_count,
         "false_count": analysis.false_count,
         "misleading_count": analysis.misleading_count,
         "conflicting_count": analysis.conflicting_count,
+        "unverifiable_count": analysis.unverifiable_count,
         "sophism_count": analysis.sophism_count,
+        "debunked_drop_count": analysis.debunked_drop_count,
+        "pipeline_stats": analysis.pipeline_stats,
         "claims": [claim_to_dict(c) for c in analysis.claims],
     }
 
 
 def claim_to_dict(c: Claim) -> dict[str, Any]:
+    """
+    Сериализация claim'а для API.
+
+    Обратносовместимо со старым форматом content_script'а: основные поля
+    text/start/verdict/type/explanation/confidence/sources на месте.
+    Новые поля (stance, judge_notes и т.п.) добавлены поверх — расширение
+    их пока не использует, но они нужны для дебага и будущих фич.
+
+    ВАЖНО: claim'ы с verdict='unverifiable' сюда тоже попадают, но
+    `/analyze` их фильтрует (в main.py перед отдачей). См. RAG_ARCHITECTURE.md §4.5.
+    """
     return {
         "text": c.text,
         "start": c.start,
@@ -214,4 +267,9 @@ def claim_to_dict(c: Claim) -> dict[str, Any]:
         "explanation": c.explanation,
         "confidence": c.confidence,
         "sources": c.sources or [],
+        # Аудит / новые поля от агентов
+        "stance": c.stance,
+        "stance_missing": c.stance_missing,
+        "extractor_verdict": c.extractor_verdict,
+        "judge_notes": c.judge_notes,
     }

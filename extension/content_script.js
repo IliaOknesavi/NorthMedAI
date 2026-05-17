@@ -16,15 +16,26 @@
   const bootstrapStarted = new Set();
   const STORAGE_KEY = "nmai_enabled";
   const TICKS_KEY = "nmai_ticks";
+  const VOICE_KEY = "nmai_voice";
+  const BACKEND_KEY = "nmai_backend";
+  const DEFAULT_BACKEND = "http://localhost:8000";
 
   // Кэшируем настройку тиков, чтобы не дёргать storage на каждый кадр.
   let ticksEnabled = true;
-  chrome.storage.sync.get(TICKS_KEY).then((s) => {
+  let voiceEnabled = false;
+  let backendUrl = DEFAULT_BACKEND;
+
+  chrome.storage.sync.get([TICKS_KEY, VOICE_KEY, BACKEND_KEY]).then((s) => {
     if (typeof s[TICKS_KEY] === "boolean") ticksEnabled = s[TICKS_KEY];
+    if (typeof s[VOICE_KEY] === "boolean") voiceEnabled = s[VOICE_KEY];
+    if (typeof s[BACKEND_KEY] === "string" && s[BACKEND_KEY]) backendUrl = s[BACKEND_KEY];
   });
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "sync" && changes[TICKS_KEY]) {
-      ticksEnabled = !!changes[TICKS_KEY].newValue;
+    if (area !== "sync") return;
+    if (changes[TICKS_KEY]) ticksEnabled = !!changes[TICKS_KEY].newValue;
+    if (changes[VOICE_KEY]) voiceEnabled = !!changes[VOICE_KEY].newValue;
+    if (changes[BACKEND_KEY] && typeof changes[BACKEND_KEY].newValue === "string") {
+      backendUrl = changes[BACKEND_KEY].newValue || DEFAULT_BACKEND;
     }
   });
 
@@ -233,16 +244,24 @@
     s.id = "nmai-styles";
     s.textContent = `
       /* Контейнер для оверлея — позиционируется поверх плеера,
-         не перехватывает клики, дочерние элементы позиционируются от него */
+         не перехватывает клики, дочерние элементы позиционируются от него.
+
+         --nmai-scale — пропорция плеера к «базовой» ширине 1280px.
+         Кладётся динамически через ResizeObserver (см. attachPlayerResizeObserver).
+         Бейдж и тултип используют её через transform: scale(...) — все
+         элементы внутри (шрифты, паддинги, иконки) масштабируются вместе. */
       #nmai-overlay {
         position: absolute;
         inset: 0;
         z-index: 60;
         pointer-events: none;
+        --nmai-scale: 1;
       }
       #nmai-overlay > * { pointer-events: auto; }
 
-      /* Кружок-индикатор */
+      /* Кружок-индикатор. Размеры фиксированные в «базовых» px, всё
+         масштабируется через transform: scale(var(--nmai-scale)) с
+         origin'ом в нижнем правом углу. */
       #nmai-badge {
         position: absolute;
         bottom: 64px;
@@ -257,14 +276,15 @@
         cursor: pointer;
         transition: opacity 0.2s, transform 0.2s;
         opacity: 0;
-        transform: scale(0.7);
+        transform: scale(calc(0.7 * var(--nmai-scale)));
+        transform-origin: bottom right;
         pointer-events: none;
         color: #1a1a1a;
         font-weight: 700;
       }
       #nmai-badge.visible {
         opacity: 1;
-        transform: scale(1);
+        transform: scale(var(--nmai-scale));
         pointer-events: auto;
       }
       #nmai-badge.misleading {
@@ -279,6 +299,14 @@
         background: rgba(138, 180, 248, 0.85);
         animation: nmai-pulse-slow 2s ease-in-out infinite;
       }
+      /* unverifiable — визуально идентично misleading (жёлтый с медленной
+         пульсацией). Семантика разная (нет подтверждений vs. подача
+         вводит в заблуждение), но для зрителя оба сигнала одного класса
+         «надо обратить внимание». */
+      #nmai-badge.unverifiable {
+        background: rgba(253, 214, 99, 0.85);
+        animation: nmai-pulse-slow 2s ease-in-out infinite;
+      }
 
       @keyframes nmai-pulse-slow {
         0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.3); }
@@ -289,7 +317,9 @@
         50%       { box-shadow: 0 0 0 8px rgba(255,255,255,0); }
       }
 
-      /* Тултип */
+      /* Тултип — позиционирован абсолютно в правом нижнем, масштабируется
+         через transform: scale() с origin'ом bottom right (чтобы при
+         уменьшении не вылетал за пределы плеера). */
       #nmai-tooltip {
         position: absolute;
         bottom: 104px;
@@ -307,6 +337,8 @@
         display: none;
         border: 1px solid rgba(255,255,255,0.08);
         box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+        transform: scale(var(--nmai-scale));
+        transform-origin: bottom right;
       }
       #nmai-tooltip.visible { display: block; }
 
@@ -320,9 +352,12 @@
         letter-spacing: 0.5px;
         margin-bottom: 10px;
       }
-      .nmai-pill.false      { background: rgba(242,139,130,0.18); color: #f28b82; }
-      .nmai-pill.misleading { background: rgba(253,214,99,0.18); color: #fdd663; }
-      .nmai-pill.sophism    { background: rgba(183,148,246,0.18); color: #b794f6; }
+      .nmai-pill.false        { background: rgba(242,139,130,0.18); color: #f28b82; }
+      .nmai-pill.misleading   { background: rgba(253,214,99,0.18);  color: #fdd663; }
+      .nmai-pill.sophism      { background: rgba(183,148,246,0.18); color: #b794f6; }
+      /* unverifiable идёт в той же категории «спорные» что и misleading —
+         визуально (жёлтый) и по счётчику в попапе. */
+      .nmai-pill.unverifiable { background: rgba(253,214,99,0.18);  color: #fdd663; }
 
       .nmai-claim {
         font-weight: 700;
@@ -449,6 +484,76 @@
       }
       .nmai-btn.primary:hover { background: rgba(102,217,177,0.28); }
 
+      /* Индикатор «Алиса говорит» — появляется на время озвучки в
+         нижнем-левом углу плеера. Слева — SVG-иконка с пульсирующим
+         «глазком» (стилизация под Алису, не копия логотипа), справа —
+         анимированный эквалайзер из 4 столбиков и подпись. */
+      #nmai-alice {
+        position: absolute;
+        bottom: 64px;
+        left: 16px;
+        display: none;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px 10px 10px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, rgba(132,72,255,0.92) 0%, rgba(228,42,142,0.92) 100%);
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+        box-shadow: 0 8px 24px rgba(132,72,255,0.35), 0 2px 8px rgba(0,0,0,0.4);
+        z-index: 10001;
+        backdrop-filter: blur(8px);
+        animation: nmai-alice-glow 1.6s ease-in-out infinite;
+        transform: scale(var(--nmai-scale));
+        transform-origin: bottom left;
+      }
+      #nmai-alice.visible { display: inline-flex; }
+
+      #nmai-alice .nmai-alice-icon {
+        width: 28px;
+        height: 28px;
+        flex: 0 0 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #nmai-alice .nmai-alice-icon svg {
+        width: 100%;
+        height: 100%;
+        filter: drop-shadow(0 0 4px rgba(255,255,255,0.5));
+      }
+
+      /* Эквалайзер из 4 столбиков — анимация с разной фазой */
+      #nmai-alice .nmai-eq {
+        display: inline-flex;
+        align-items: flex-end;
+        gap: 3px;
+        height: 16px;
+        margin-left: 2px;
+      }
+      #nmai-alice .nmai-eq span {
+        width: 3px;
+        background: #fff;
+        border-radius: 2px;
+        animation: nmai-eq-bar 0.9s ease-in-out infinite;
+      }
+      #nmai-alice .nmai-eq span:nth-child(1) { animation-delay: -0.40s; }
+      #nmai-alice .nmai-eq span:nth-child(2) { animation-delay: -0.20s; }
+      #nmai-alice .nmai-eq span:nth-child(3) { animation-delay: -0.60s; }
+      #nmai-alice .nmai-eq span:nth-child(4) { animation-delay: -0.10s; }
+
+      @keyframes nmai-eq-bar {
+        0%, 100% { height: 30%; }
+        50%       { height: 100%; }
+      }
+      @keyframes nmai-alice-glow {
+        0%, 100% { box-shadow: 0 8px 24px rgba(132,72,255,0.35), 0 2px 8px rgba(0,0,0,0.4); }
+        50%      { box-shadow: 0 8px 28px rgba(228,42,142,0.55), 0 2px 12px rgba(0,0,0,0.45); }
+      }
+
       /* Тики на прогресс-баре */
       .nmai-tick {
         position: absolute;
@@ -460,9 +565,10 @@
         pointer-events: none;
         box-shadow: 0 0 4px rgba(0,0,0,0.5);
       }
-      .nmai-tick.false      { background: #f28b82; }
-      .nmai-tick.misleading { background: #fdd663; }
-      .nmai-tick.sophism    { background: #8ab4f8; }
+      .nmai-tick.false        { background: #f28b82; }
+      .nmai-tick.misleading   { background: #fdd663; }
+      .nmai-tick.sophism      { background: #8ab4f8; }
+      .nmai-tick.unverifiable { background: #fdd663; }
     `;
     document.head.appendChild(s);
   }
@@ -557,6 +663,7 @@
   function tickClass(c) {
     if (c.type === "sophism") return "sophism";
     if (c.verdict === "false") return "false";
+    if (c.verdict === "unverifiable") return "unverifiable";
     return "misleading";
   }
 
@@ -592,8 +699,108 @@
       activeClaim = match;
       showBadge(match);
     } else if (!match && activeClaim) {
+      const justClosed = activeClaim;
       activeClaim = null;
       hideBadge();
+      // В конце окна показа метки: если включён тумблер озвучки —
+      // ставим паузу видео и зачитываем explanation. После окончания
+      // play() обратно. См. speakExplanation().
+      if (voiceEnabled && justClosed?.explanation) {
+        speakExplanation(video, justClosed);
+      }
+    }
+  }
+
+  // ─── TTS через бэкенд /tts (Yandex SpeechKit) ──────────────────────────
+  // Дёргаем бэкенд POST /tts с текстом explanation, получаем mp3,
+  // играем через временный <audio>. Поверх ставим pause/play видео.
+  // Используется только когда tumblr nmai_voice включён в попапе.
+  let speakingNow = false;
+
+  // SVG иконки Алисы — стилизованный логотип (треугольник со звуковыми
+  // волнами). НЕ копия настоящей айдентики Яндекса, но визуально на неё
+  // похож. Звуковые волны анимируются через CSS-keyframes.
+  const ALICE_SVG = `
+    <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="16" cy="16" r="14" fill="rgba(255,255,255,0.18)"/>
+      <path d="M16 7 L23 23 H9 Z" fill="#fff" opacity="0.95"/>
+      <circle cx="16" cy="17" r="2.3" fill="rgba(132,72,255,1)"/>
+    </svg>`;
+
+  function getAliceIndicator() {
+    let el = document.getElementById("nmai-alice");
+    if (el) return el;
+    const root = getOverlayRoot();
+    if (!root) return null;
+    el = document.createElement("div");
+    el.id = "nmai-alice";
+    el.innerHTML = `
+      <div class="nmai-alice-icon">${ALICE_SVG}</div>
+      <span>Алиса возражает</span>
+      <div class="nmai-eq"><span></span><span></span><span></span><span></span></div>
+    `;
+    root.appendChild(el);
+    return el;
+  }
+
+  function showAliceIndicator() {
+    const el = getAliceIndicator();
+    if (el) el.classList.add("visible");
+  }
+
+  function hideAliceIndicator() {
+    const el = document.getElementById("nmai-alice");
+    if (el) el.classList.remove("visible");
+  }
+
+  async function speakExplanation(video, claim) {
+    if (speakingNow) return;     // не накладываем озвучки друг на друга
+    const text = (claim?.explanation || "").trim();
+    if (!text) return;
+
+    speakingNow = true;
+    const wasPlaying = !video.paused;
+    try {
+      video.pause();
+    } catch { /* пофиг */ }
+
+    let url = null;
+    try {
+      const r = await fetch(`${backendUrl}/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!r.ok) {
+        console.warn("[NMAI] tts: HTTP", r.status);
+        speakingNow = false;
+        if (wasPlaying) video.play().catch(() => {});
+        return;
+      }
+      const blob = await r.blob();
+      url = URL.createObjectURL(blob);
+    } catch (e) {
+      console.warn("[NMAI] tts: fetch упал", e);
+      speakingNow = false;
+      if (wasPlaying) video.play().catch(() => {});
+      return;
+    }
+
+    const audio = new Audio(url);
+    const cleanup = () => {
+      try { URL.revokeObjectURL(url); } catch {}
+      hideAliceIndicator();
+      speakingNow = false;
+      if (wasPlaying) video.play().catch(() => {});
+    };
+    audio.addEventListener("ended", cleanup);
+    audio.addEventListener("error", cleanup);
+    try {
+      showAliceIndicator();
+      await audio.play();
+    } catch (e) {
+      console.warn("[NMAI] tts: audio.play() упал", e);
+      cleanup();
     }
   }
 
@@ -608,7 +815,35 @@
     root = document.createElement("div");
     root.id = "nmai-overlay";
     player.appendChild(root);
+    attachPlayerResizeObserver(player, root);
     return root;
+  }
+
+  // ─── Адаптивность: масштаб бейджа и тултипа по ширине плеера ──────────
+  // Базовая ширина плеера = 1280px (стандарт YouTube). На неё откалиброваны
+  // абсолютные размеры в CSS (32px badge, 340px tooltip, 13px шрифт).
+  // На fullscreen 2560px → scale ≈ 1.5; на маленьком embedded 480px → 0.7.
+  // Clamp удерживает в диапазоне [0.7, 1.6] чтобы не уходить в крайности.
+  let _resizeObserver = null;
+
+  function attachPlayerResizeObserver(player, root) {
+    if (_resizeObserver) _resizeObserver.disconnect();
+
+    const apply = () => {
+      const w = player.getBoundingClientRect().width || 1280;
+      const raw = w / 1280;
+      const scale = Math.max(0.7, Math.min(1.6, raw));
+      root.style.setProperty("--nmai-scale", scale.toFixed(3));
+    };
+
+    apply();   // первый замер сразу
+    try {
+      _resizeObserver = new ResizeObserver(apply);
+      _resizeObserver.observe(player);
+    } catch {
+      // ResizeObserver не поддерживается — fallback на window.resize
+      window.addEventListener("resize", apply);
+    }
   }
 
   function getBadge() {
@@ -633,7 +868,10 @@
       return;
     }
     badge.className = `visible ${tickClass(claim)}`;
-    badge.textContent = claim.type === "sophism" ? "💬" : claim.verdict === "false" ? "✗" : "⚠";
+    badge.textContent =
+        claim.type === "sophism"   ? "💬"
+      : claim.verdict === "false"  ? "✗"
+      :                              "⚠";   // misleading + unverifiable = ⚠
     console.log("[NMAI] показан бейдж для claim @", claim.start, "s:", claim.text.slice(0, 60));
   }
 
@@ -686,9 +924,9 @@
 
     const pillClass = tickClass(claim);
     const pillLabel =
-      claim.type === "sophism" ? "Логическая ошибка"
-      : claim.verdict === "false" ? "Ложное утверждение"
-      : "Спорное утверждение";
+        claim.type === "sophism"           ? "Логическая ошибка"
+      : claim.verdict === "false"          ? "Ложное утверждение"
+      :                                      "Спорное утверждение";   // misleading + unverifiable
 
     // экранируем чтобы кавычки/угловые скобки из текста не сломали разметку
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({
@@ -788,9 +1026,14 @@
       ticksObserver.disconnect();
       ticksObserver = null;
     }
+    if (_resizeObserver) {
+      _resizeObserver.disconnect();
+      _resizeObserver = null;
+    }
     document.getElementById("nmai-overlay")?.remove();
     document.getElementById("nmai-badge")?.remove();
     document.getElementById("nmai-tooltip")?.remove();
+    document.getElementById("nmai-alice")?.remove();
     document.querySelectorAll(".nmai-tick").forEach((el) => el.remove());
     activeClaim = null;
   }

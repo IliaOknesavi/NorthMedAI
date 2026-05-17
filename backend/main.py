@@ -13,6 +13,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,14 +29,21 @@ from db import (
     save_analysis,
     upsert_video_transcript,
 )
+from agents.prompts import (
+    JUDGE_VERSION,
+    QA_VERSION,
+    RETRIEVER_VERSION,
+    STANCE_VERSION,
+)
 from detector import YANDEX_GPT_MODEL, analyze_claims
 from models import Video
 from transcript import extract_video_id, get_transcript
+from tts import synthesize as tts_synthesize
 from youtube_transcript_api import NoTranscriptFound, TranscriptsDisabled
 
 log = logging.getLogger("backend.main")
 
-DETECTOR_VERSION = "v2-strict-prompt"
+DETECTOR_VERSION = "v3-no-self-warnings"
 
 # Блокируем параллельные /analyze для одного и того же video_id.
 # Если расширение успело отправить второй запрос, пока первый ещё считает
@@ -92,6 +100,11 @@ class AnalyzeRequest(BaseModel):
     video_id: str  # YouTube video ID или полный URL
 
 
+class TTSRequest(BaseModel):
+    text: str
+    voice: str | None = None
+
+
 class AnalyzeResponse(BaseModel):
     video_id: str
     cached: bool                # True если отдали ранее сохранённый анализ
@@ -134,6 +147,26 @@ async def _fetch_transcript_or_4xx(video_id: str) -> list[dict]:
         raise HTTPException(status_code=500, detail=f"Субтитры недоступны: {e}")
 
 
+def _filter_for_overlay(claims: list[dict]) -> list[dict]:
+    """
+    Что доходит до content_script.js — все verdict'ы, включая `unverifiable`.
+
+    Раньше мы дропали unverifiable, считая что «неуверенное» не нужно
+    показывать. На P1 решение пересмотрено (см. диалог 2026-05-17):
+    отсутствие достоверных источников — это сам по себе полезный сигнал
+    для пользователя. Метка показывается с пометкой «нет источников,
+    подтверждающих это утверждение» (explanation начинается с
+    «Не удалось проверить:»).
+
+    Расширению нужно отрисовать этот verdict отдельным стилем (серый
+    нейтральный) — см. extension/content_script.js. Формулировка
+    explanation у unverifiable начинается с «Нет подтверждений:» —
+    смысловой акцент на самом claim'е («утверждение не подкреплено
+    источниками»), а не на нас («мы не нашли»).
+    """
+    return list(claims)
+
+
 def _payload_from_analysis(
     *, video_id: str, analysis_dict: dict, transcript_preview: list, transcript_total: int, cached: bool
 ) -> dict:
@@ -145,7 +178,27 @@ def _payload_from_analysis(
         "model": analysis_dict["model"],
         "transcript_snippets": transcript_total,
         "transcript_preview": transcript_preview,
-        "claims": analysis_dict["claims"],
+        "claims": _filter_for_overlay(analysis_dict["claims"]),
+        # Метаданные pipeline для UI-попапа: версии агентов, статистика
+        # и счётчики verdict'ов. Не используются content_script'ом, но
+        # popup.js рисует из них «Pipeline» секцию.
+        "pipeline_stats": analysis_dict.get("pipeline_stats"),
+        "versions": {
+            "detector": analysis_dict.get("detector_version") or "",
+            "stance":   analysis_dict.get("stance_version")   or "",
+            "retriever": analysis_dict.get("retriever_version") or "",
+            "judge":    analysis_dict.get("judge_version")    or "",
+            "qa":       analysis_dict.get("qa_version")       or "",
+        },
+        "counts": {
+            "claims":       analysis_dict.get("claims_count", 0),
+            "false":        analysis_dict.get("false_count", 0),
+            "misleading":   analysis_dict.get("misleading_count", 0),
+            "conflicting":  analysis_dict.get("conflicting_count", 0),
+            "unverifiable": analysis_dict.get("unverifiable_count", 0),
+            "sophism":      analysis_dict.get("sophism_count", 0),
+            "debunked_dropped": analysis_dict.get("debunked_drop_count", 0),
+        },
     }
 
 
@@ -154,6 +207,27 @@ def _payload_from_analysis(
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.post("/tts")
+async def tts_endpoint(req: TTSRequest) -> Response:
+    """
+    Синтез речи через Yandex SpeechKit. Возвращает audio/mp3.
+
+    Используется extension/content_script.js — в конце окна показа метки
+    (если включён тумблер nmai_voice) расширение ставит pause(), дёргает
+    этот эндпоинт с explanation, играет mp3 через <audio>, на ended
+    возобновляет play() видео.
+    """
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text обязателен")
+    audio = await tts_synthesize(text, voice=req.voice)
+    if audio is None:
+        # SpeechKit отвалился или нет credentials — клиент пусть
+        # просто не озвучивает (расширение это переживёт).
+        raise HTTPException(status_code=503, detail="TTS недоступен")
+    return Response(content=audio, media_type="audio/mpeg")
 
 
 @app.get("/video/{video_id}")
@@ -298,13 +372,16 @@ async def _run_fresh_analysis(session: AsyncSession, video_id: str) -> dict:
     await upsert_video_transcript(session, video_id=video_id, transcript=snippets)
 
     try:
-        claims = await analyze_claims(snippets)
+        analysis_result = await analyze_claims(snippets)
     except RuntimeError as e:
         log.error("detector конфиг: %s", e)
-        claims = []
+        analysis_result = {"claims": [], "stats": None}
     except Exception:
         log.exception("detector упал, отдаю пустые claims")
-        claims = []
+        analysis_result = {"claims": [], "stats": None}
+
+    claims = analysis_result["claims"]
+    stats = analysis_result["stats"]
 
     analysis = await save_analysis(
         session,
@@ -312,6 +389,12 @@ async def _run_fresh_analysis(session: AsyncSession, video_id: str) -> dict:
         claims=claims,
         model=YANDEX_GPT_MODEL,
         detector_version=DETECTOR_VERSION,
+        stance_version=STANCE_VERSION,
+        retriever_version=RETRIEVER_VERSION,
+        judge_version=JUDGE_VERSION,
+        qa_version=QA_VERSION,
+        debunked_drop_count=(stats["debunked_drop_count"] if stats else 0),
+        pipeline_stats=stats,
     )
 
     return _payload_from_analysis(

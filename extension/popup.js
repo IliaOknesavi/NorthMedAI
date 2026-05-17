@@ -187,7 +187,11 @@ function refreshStatusFromToggle() {
 
 function showCounts(claims) {
   const f = claims.filter(c => c.verdict === "false").length;
-  const d = claims.filter(c => c.verdict === "misleading" || c.verdict === "conflicting").length;
+  const d = claims.filter(c =>
+    c.verdict === "misleading" ||
+    c.verdict === "conflicting" ||
+    c.verdict === "unverifiable"
+  ).length;
   const s = claims.filter(c => c.type === "sophism").length;
 
   els.countFalse.textContent = f;
@@ -204,12 +208,79 @@ async function pushOverlayToTab(claims) {
   chrome.tabs.sendMessage(currentTab.id, { action: "showOverlay", claims }).catch(() => {});
 }
 
+function showPipeline(data) {
+  const card = document.getElementById("pipeline-card");
+  if (!card) return;
+  const stats = data.pipeline_stats;
+  const versions = data.versions || {};
+  if (!stats) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+
+  const timeEl = document.getElementById("pipeline-time");
+  if (timeEl) {
+    const duration = stats.duration_s;
+    timeEl.textContent = (typeof duration === "number") ? `${duration.toFixed(1)} с` : "";
+  }
+
+  const funnel = document.getElementById("pipeline-funnel");
+  if (funnel) {
+    const inN = stats.claims_in ?? 0;
+    const afterStance = stats.claims_after_drop ?? inN;
+    const beforeQA = stats.claims_before_qa ?? afterStance;
+    const finalN = stats.final_claims ?? 0;
+    const stanceDropped = (stats.stance_debunked_fully ?? 0) + (stats.stance_quoted_neutral ?? 0);
+    const qaDropped = stats.qa_dropped ?? 0;
+    const qaRepaired = stats.qa_repaired ?? 0;
+    const qaDedup = stats.qa_dedup_merges ?? 0;
+
+    const denom = Math.max(inN, 1);
+    const rows = [
+      { name: "Extractor", val: inN, drop: false },
+      { name: "Stance drop", val: stanceDropped, drop: true },
+      { name: "После Stance", val: afterStance, drop: false },
+      { name: "После Judge", val: beforeQA, drop: false },
+      { name: "QA drop", val: qaDropped, drop: true },
+      { name: "QA repair", val: qaRepaired, drop: true },
+      { name: "QA dedup", val: qaDedup, drop: true },
+      { name: "В оверлей", val: finalN, drop: false },
+    ];
+
+    funnel.innerHTML = rows.map((row) => {
+      const pct = Math.min(100, Math.round((row.val / denom) * 100));
+      return `
+        <div class="pipeline-stage ${row.drop ? "drop" : ""}">
+          <span class="stage-name">${row.name}</span>
+          <span class="stage-bar"><span style="width:${pct}%"></span></span>
+          <span class="stage-value">${row.val}</span>
+        </div>`;
+    }).join("");
+  }
+
+  const vEl = document.getElementById("pipeline-versions");
+  if (vEl) {
+    const items = [
+      ["Detector", versions.detector],
+      ["Stance", versions.stance],
+      ["Retriever", versions.retriever],
+      ["Judge", versions.judge],
+      ["QA", versions.qa],
+    ].filter(([, version]) => version);
+
+    vEl.innerHTML = items.map(([name, version]) =>
+      `<span class="ver-badge"><b>${name}</b>${version}</span>`
+    ).join("");
+  }
+}
+
 function handleResponse(resp) {
   if (!resp?.ok) {
     const msg = resp?.error ?? "Ошибка анализа";
     let key = null;
     if (msg.includes("Connection reset") || msg.includes("502") || msg.includes("временно")) key = "err_connection_reset";
-    else if (msg.includes("отключены") || msg.includes("subtitles")) key = "err_no_subtitles";
+    else if (msg.includes("отключены") || msg.includes("не найдено") || msg.includes("subtitles")) key = "err_no_subtitles";
     setStatus({
       mode: "off",
       title: window.NMAI_I18N?.t(currentLang, "err_unknown") || "Ошибка",
@@ -221,6 +292,7 @@ function handleResponse(resp) {
   const data = resp.data ?? {};
   const claims = data.claims ?? [];
   showCounts(claims);
+  showPipeline(data);
 
   const ttl = window.NMAI_I18N?.t(currentLang, "auto_on_title") || "Анализ выполнен";
   const cnt = window.NMAI_I18N?.claimsCount?.(currentLang, claims.length) || `${claims.length} утверждений`;

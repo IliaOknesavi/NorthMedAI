@@ -65,6 +65,12 @@ SYSTEM_PROMPT = """Ты — медицинский фактчекер на YouTu
   «грипп вызывается вирусом»). Если утверждение СООТВЕТСТВУЕТ доказательной
   медицине — НЕ включай его в ответ. Список должен содержать только то,
   на что зрителю стоит обратить внимание.
+- СОВЕТЫ И ПРЕДУПРЕЖДЕНИЯ САМОГО АВТОРА. Если фраза начинается с
+  «не пейте», «не делайте», «не верьте», «не используйте», «избегайте»,
+  «не лечите X с помощью Y» и т.п. — это совет автора, а не миф.
+  Такие фразы автор говорит ПРАВИЛЬНО (предостерегает зрителя), их
+  выписывать НЕ нужно. Пример: «не пейте перекись водорода» — это
+  безусловно верный совет, не false claim.
 - Шутки, лирические отступления, мнения о вкусе и т.п.
 - Если в транскрипте нет ничего проверяемого — верни пустой массив claims.
 
@@ -288,53 +294,6 @@ def _normalize_verdict(raw: object) -> str | None:
     return _VERDICT_ALIASES.get(s)
 
 
-def _placeholder_sources(text: str, verdict: str, ctype: str) -> list[dict]:
-    """
-    Временные источники, пока retriever.py не написан.
-
-    Это НЕ выдуманные URL — мы формируем поисковые запросы в PubMed и WHO
-    с текстом claim'а, чтобы пользователь, кликнув, попал на реальную
-    страницу с результатами. Когда появится настоящий retriever, эти
-    заглушки заменятся конкретными статьями.
-
-    Логика подбора по verdict (черновой mapping иерархии доверия):
-      - false / misleading / sophism — медицина: PubMed + WHO;
-      - conflicting                   — медицина: PubMed + Cochrane.
-
-    Все ссылки помечаются mock=True, чтобы фронт мог их при желании отрисовать
-    иначе и чтобы мы потом могли отличить «placeholder» от «настоящих».
-    """
-    from urllib.parse import quote_plus
-
-    q = quote_plus(text[:120])
-
-    pubmed = {
-        "title": "PubMed",
-        "url": f"https://pubmed.ncbi.nlm.nih.gov/?term={q}",
-        "tier": "pubmed",
-        "weight": 0.9,
-        "mock": True,
-    }
-    who = {
-        "title": "WHO",
-        "url": f"https://www.who.int/home/search?indexCatalogue=genericsearchindex1&searchQuery={q}",
-        "tier": "who",
-        "weight": 0.85,
-        "mock": True,
-    }
-    cochrane = {
-        "title": "Cochrane",
-        "url": f"https://www.cochranelibrary.com/search?searchBy=1&searchText={q}",
-        "tier": "pubmed",
-        "weight": 0.9,
-        "mock": True,
-    }
-
-    if verdict == "conflicting":
-        return [pubmed, cochrane]
-    return [pubmed, who]
-
-
 def _validate_claim(c: dict) -> dict | None:
     """
     Возвращает нормализованный claim или None если невалидный.
@@ -377,8 +336,10 @@ def _validate_claim(c: dict) -> dict | None:
 
     explanation = (c.get("explanation") or "").strip()
 
-    # Если модель сама приложила источники — берём их (после нормализации).
-    # Иначе подставляем placeholder, чтобы UI не был пустым до retriever.py.
+    # sources на этом этапе НЕ заполняем — это работа Retriever'а
+    # (agents/retriever.py). Если модель почему-то прислала свои —
+    # подберём их корректно нормализованными (Pipeline решит, использовать
+    # или перезаписать).
     raw_sources = c.get("sources")
     sources: list[dict] = []
     if isinstance(raw_sources, list):
@@ -391,8 +352,6 @@ def _validate_claim(c: dict) -> dict | None:
                     "weight": float(s.get("weight") or 0.5),
                     "mock": bool(s.get("mock", False)),
                 })
-    if not sources:
-        sources = _placeholder_sources(text, verdict, ctype)
 
     return {
         "text": text[:500],
@@ -401,7 +360,7 @@ def _validate_claim(c: dict) -> dict | None:
         "type": ctype,
         "explanation": explanation[:1000],
         "confidence": round(confidence, 2),
-        "sources": sources,
+        "sources": sources,   # пусто после Extractor'а — Retriever заполнит
     }
 
 
@@ -466,7 +425,7 @@ async def _analyze_chunk(chunk: list[dict], chunk_idx: int = 0) -> list[dict]:
     return cleaned
 
 
-async def analyze_claims(snippets: list[dict]) -> list[dict]:
+async def analyze_claims(snippets: list[dict]) -> dict:
     """
     Главная точка входа из main.py.
 
@@ -474,11 +433,17 @@ async def analyze_claims(snippets: list[dict]) -> list[dict]:
         snippets: [{"text": str, "start": float, "duration": float}, ...]
 
     Возвращает:
-        список claims в формате, ожидаемом content_script.js:
-        [{"text", "start", "verdict", "type", "explanation", "confidence", "sources"}]
+        {
+          "claims": [...],   # список FinalClaim — то, что save_analysis ждёт
+          "stats":  {...},   # метрики прогона pipeline'а
+        }
+
+    Шаги:
+      1) Extractor (этот файл, _analyze_chunk) — извлекает RawClaim'ы
+      2) Pipeline (agents/pipeline.enrich) — Stance → Query Former → Retriever → Judge
     """
     if not snippets:
-        return []
+        return {"claims": [], "stats": None}
 
     chunks = _chunk_snippets(snippets)
     log.info(
@@ -498,27 +463,34 @@ async def analyze_claims(snippets: list[dict]) -> list[dict]:
         return_exceptions=True,
     )
 
-    all_claims: list[dict] = []
+    raw_claims: list[dict] = []
     failed = 0
     for i, r in enumerate(results):
         if isinstance(r, Exception):
             failed += 1
             log.warning("чанк #%d упал с ошибкой: %s", i, r)
             continue
-        all_claims.extend(r)
+        raw_claims.extend(r)
 
-    # Сортируем по таймкоду, чтобы оверлей рисовал слева направо
-    all_claims.sort(key=lambda c: c["start"])
+    # Сортируем по таймкоду до передачи в pipeline — Stance Detector смотрит
+    # на хронологический порядок.
+    raw_claims.sort(key=lambda c: c["start"])
     log.info(
-        "анализ завершён: claims=%d (false=%d, misleading=%d, conflicting=%d, true=%d), упало чанков=%d",
-        len(all_claims),
-        sum(1 for c in all_claims if c["verdict"] == "false"),
-        sum(1 for c in all_claims if c["verdict"] == "misleading"),
-        sum(1 for c in all_claims if c["verdict"] == "conflicting"),
-        sum(1 for c in all_claims if c["verdict"] == "true"),
+        "extractor завершён: raw_claims=%d (false=%d, misleading=%d, conflicting=%d), упало чанков=%d",
+        len(raw_claims),
+        sum(1 for c in raw_claims if c["verdict"] == "false"),
+        sum(1 for c in raw_claims if c["verdict"] == "misleading"),
+        sum(1 for c in raw_claims if c["verdict"] == "conflicting"),
         failed,
     )
-    return all_claims
+
+    # --- Шаги 1.5..4: agents pipeline (stance → query → retrieve → judge) ---
+    # Импорт локальный, чтобы при недоступности зависимостей агентов
+    # detector.py всё равно можно было импортировать и запускать как CLI.
+    from agents.pipeline import enrich
+
+    result = await enrich(snippets, raw_claims)  # type: ignore[arg-type]
+    return {"claims": result["claims"], "stats": result["stats"]}
 
 
 # --- CLI для отладки -----------------------------------------------------
@@ -536,15 +508,29 @@ if __name__ == "__main__":
         snippets = get_transcript(video_id)
         print(f"Сниппетов: {len(snippets)}")
 
-        print("Анализирую через YandexGPT...")
-        claims = await analyze_claims(snippets)
-        print(f"Найдено утверждений: {len(claims)}\n")
+        print("Анализирую через YandexGPT + agents pipeline...")
+        result = await analyze_claims(snippets)
+        claims = result["claims"]
+        stats = result["stats"]
+        print(f"Найдено утверждений: {len(claims)}")
+        if stats:
+            print(
+                f"Pipeline: in={stats['claims_in']} stance("
+                f"a={stats['stance_asserted']},"
+                f"df={stats['stance_debunked_fully']},"
+                f"dp={stats['stance_debunked_partially']},"
+                f"qn={stats['stance_quoted_neutral']}) "
+                f"→ final={stats['final_claims']} за {stats['duration_s']}s"
+            )
+        print()
         for c in claims:
             print(
-                f"[{c['start']:.1f}s] ({c['verdict']}/{c['type']}, "
+                f"[{c['start']:.1f}s] ({c['verdict']}/{c['type']}/{c.get('stance', '?')}, "
                 f"conf={c['confidence']}) {c['text']}"
             )
             if c["explanation"]:
                 print(f"   -> {c['explanation']}")
+            if c.get("sources"):
+                print(f"   sources: {len(c['sources'])} шт.")
 
     asyncio.run(_main())
