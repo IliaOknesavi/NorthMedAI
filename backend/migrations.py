@@ -96,6 +96,35 @@ MIGRATIONS: list[tuple[str, str, bool]] = [
         """,
         True,
     ),
+    # M0004 — пересоздаём embedding column под реальную размерность
+    # Yandex Foundation Models (256). Раньше было vector(1024).
+    # Все старые chunks (если были) теряют embedding (NULL) и должны
+    # быть переингесчены через python -m corpus_ingest.
+    (
+        "M0004_drop_old_ivfflat_index",
+        "DROP INDEX IF EXISTS ix_corpus_chunks_embedding;",
+        True,
+    ),
+    (
+        "M0004_corpus_chunks_embedding_256",
+        """
+        ALTER TABLE corpus_chunks
+          DROP COLUMN IF EXISTS embedding;
+        ALTER TABLE corpus_chunks
+          ADD COLUMN embedding vector(256);
+        """,
+        True,
+    ),
+    (
+        "M0004_recreate_ivfflat_index_256",
+        """
+        CREATE INDEX IF NOT EXISTS ix_corpus_chunks_embedding
+        ON corpus_chunks
+        USING ivfflat (embedding vector_cosine_ops)
+        WITH (lists = 100);
+        """,
+        True,
+    ),
 ]
 
 

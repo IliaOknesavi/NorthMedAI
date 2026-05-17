@@ -31,7 +31,11 @@ YANDEX_API_KEY = os.getenv("YANDEX_API_KEY", "").strip()
 YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID", "").strip()
 YANDEX_EMB_BASE = "https://llm.api.cloud.yandex.net/foundationModels/v1/textEmbedding"
 
-EMBEDDING_DIM = 1024
+# Yandex Foundation Models text-search-doc/text-search-query сейчас
+# возвращают 256-мерные эмбеддинги (раньше документация упоминала 1024,
+# но live-прогон в мае 2026 даёт чётко 256). Если когда-то поменяется —
+# логи покажут warning 'неожиданная форма ответа dim=N'.
+EMBEDDING_DIM = 256
 REQUEST_TIMEOUT = 20.0
 # Yandex Embeddings — отдельный rate-limit, обычно мягкий
 _SEMAPHORE = asyncio.Semaphore(3)

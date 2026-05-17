@@ -1,11 +1,14 @@
 """
-test_yandex_search.py — общий клиент Yandex Search XML API без сети.
+test_yandex_search.py — общий клиент Yandex Cloud Search API без сети.
 Мочим httpx, проверяем парсинг XML и graceful fallback'и.
+
+С v2 API: POST с JSON body, ответ {"rawData": "<base64 XML>"}.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import sys
 from pathlib import Path
 
@@ -15,6 +18,12 @@ import httpx
 import pytest
 
 from agents.sources import _yandex_search as ys
+
+
+def _b64_response(xml_text: str) -> httpx.Response:
+    """Имитация ответа Search API: JSON с base64 XML."""
+    raw = base64.b64encode(xml_text.encode("utf-8")).decode("ascii")
+    return httpx.Response(200, json={"rawData": raw})
 
 
 VALID_XML = """<?xml version="1.0" encoding="utf-8"?>
@@ -99,7 +108,9 @@ def test_search_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """Мокаем httpx, проверяем что вернутся 2 нормальных результата."""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text=VALID_XML)
+        # Search API v2: POST с JSON body, ответ — JSON с base64 XML
+        assert request.method == "POST"
+        return _b64_response(VALID_XML)
 
     transport = httpx.MockTransport(handler)
     real_client = httpx.AsyncClient
@@ -140,7 +151,7 @@ def test_search_dedups_by_url(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         call_count["n"] += 1
-        return httpx.Response(200, text=VALID_XML)
+        return _b64_response(VALID_XML)
 
     transport = httpx.MockTransport(handler)
     real_client = httpx.AsyncClient

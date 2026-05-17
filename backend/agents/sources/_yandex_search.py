@@ -1,23 +1,26 @@
 """
-agents/sources/_yandex_search.py — общий клиент Yandex Search API.
+agents/sources/_yandex_search.py — общий клиент Yandex Cloud Search API.
 
 Используется адаптерами WHO, CDC/NEJM, Минздрав, News. Все они работают
-по одной схеме: вызов Yandex Search с `site:` ограничением по whitelist,
-получение списка URL + snippet, опциональный фетч/парс контента.
+по одной схеме: вызов Search API с `site:` ограничением по whitelist,
+получение списка URL + snippet, опциональный fetch/парс PDF контента.
 
-Документация API: https://yandex.cloud/ru/docs/search-api/operations/search.
+Документация: https://yandex.cloud/docs/search-api/operations/web-search
 
-Без ключа (YANDEX_SEARCH_API_KEY не задан в .env) клиент возвращает []
-и пишет WARNING — это требование на сегодня (см. диалог с Ильёй):
-адаптеры должны работать с graceful fallback'ом.
+API: POST https://searchapi.api.cloud.yandex.net/v2/web/search
+  - Authorization: Api-Key <key>
+  - Body: JSON с query, page, groupSpec, max_passages
+  - Response: {"rawData": "<base64 XML>"}
 
-Формат: используем синхронный XML-endpoint, потому что он самый простой
-и не требует polling'а как у /searchAsync.
+Графцеful fallback: без YANDEX_SEARCH_API_KEY / YANDEX_API_KEY клиент
+возвращает [] и пишет WARNING.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 import os
 import xml.etree.ElementTree as ET
@@ -31,28 +34,25 @@ load_dotenv()
 log = logging.getLogger("agents.sources.yandex_search")
 
 
-# В Yandex Cloud один API key работает для всех сервисов AI Studio
+# В Yandex Cloud один API key обслуживает все сервисы AI Studio
 # (YandexGPT + Embeddings + Search API), если у Service Account есть
 # соответствующие роли. Поэтому если YANDEX_SEARCH_API_KEY не задан
-# отдельно — fallback на основной YANDEX_API_KEY, который уже точно
-# есть в .env (без него YandexGPT не работал бы). Если у Service Account
-# нет роли search-api.executor — Yandex Search вернёт 401, и в логах
-# увидим warning.
+# отдельно — fallback на основной YANDEX_API_KEY.
 YANDEX_SEARCH_API_KEY = (
     os.getenv("YANDEX_SEARCH_API_KEY", "").strip()
     or os.getenv("YANDEX_API_KEY", "").strip()
 )
-# Yandex Search хочет folder_id; используем тот же, что у YandexGPT
 YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID", "").strip()
 
-# Альтернативный domain: yandex.com работает за рубежом.
+# Новый Yandex Cloud Search API. Старый yandex.ru/search/xml — это
+# партнёрский XML с другой аутентификацией, не подходит.
 YANDEX_SEARCH_BASE = os.getenv(
     "YANDEX_SEARCH_BASE",
-    "https://yandex.ru/search/xml",
+    "https://searchapi.api.cloud.yandex.net/v2/web/search",
 ).strip()
 
-REQUEST_TIMEOUT = 15.0
-PER_QUERY_LIMIT = 5            # сколько top-результатов берём из выдачи
+REQUEST_TIMEOUT = 20.0
+PER_QUERY_LIMIT = 5
 _SEMAPHORE = asyncio.Semaphore(5)
 
 
@@ -130,6 +130,13 @@ def _join_sites(domains: list[str]) -> str:
     return " | ".join(f"site:{d}" for d in domains)
 
 
+def _search_type_for_lang(lang: str) -> str:
+    """Маппинг 'ru'/'en' → API константа Search Type."""
+    if lang == "ru":
+        return "SEARCH_TYPE_RU"
+    return "SEARCH_TYPE_COM"   # английский / международный поиск
+
+
 async def search(
     queries: list[str],
     *,
@@ -143,7 +150,7 @@ async def search(
     Возвращает список dict'ов: {url, title, snippet, modtime, query}.
     На любых ошибках — [] и WARNING.
 
-    Если YANDEX_SEARCH_API_KEY не задан — сразу [].
+    Если ключи не заданы (ни YANDEX_SEARCH_API_KEY, ни YANDEX_API_KEY) — сразу [].
     """
     if not is_configured():
         log.warning(
@@ -159,23 +166,38 @@ async def search(
         return []
 
     domain_filter = _join_sites(domains or [])
+    headers = {
+        "Authorization": f"Api-Key {YANDEX_SEARCH_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    search_type = _search_type_for_lang(lang)
 
     async def _one_query(query: str) -> list[dict[str, Any]]:
         final_query = f"{query} {domain_filter}" if domain_filter else query
-        params = {
-            "folderid": YANDEX_FOLDER_ID,
-            "apikey": YANDEX_SEARCH_API_KEY,
-            "query": final_query,
-            "l10n": lang,
-            "groupby": (
-                f"attr=d.mode=deep.groups-on-page={per_query}.docs-in-group=1"
-            ),
+        payload = {
+            "query": {
+                "searchType": search_type,
+                "queryText": final_query,
+                "familyMode": "FAMILY_MODE_NONE",
+                "page": "0",
+                "fixTypoMode": "FIX_TYPO_MODE_ON",
+            },
+            "groupSpec": {
+                "groupMode": "GROUP_MODE_DEEP",
+                "groupsOnPage": str(per_query),
+                "docsInGroup": "1",
+            },
+            "maxPassages": "3",
+            "region": "225" if lang == "ru" else "84",  # 225=Russia, 84=USA
+            "folderId": YANDEX_FOLDER_ID,
+            "responseFormat": "FORMAT_XML",
         }
         async with _SEMAPHORE:
             try:
                 async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-                    r = await client.get(YANDEX_SEARCH_BASE, params=params)
+                    r = await client.post(YANDEX_SEARCH_BASE, json=payload, headers=headers)
                     r.raise_for_status()
+                    data = r.json()
             except httpx.HTTPError as e:
                 log.warning("yandex_search: HTTP error для %r: %s", final_query[:80], e)
                 return []
@@ -183,7 +205,19 @@ async def search(
                 log.exception("yandex_search: непредвиденная ошибка для %r", final_query[:80])
                 return []
 
-        items = _parse_yandex_search_xml(r.text)
+        # Response: {"rawData": "<base64 XML>"}
+        raw_b64 = data.get("rawData") or data.get("raw_data") or ""
+        if not raw_b64:
+            log.warning("yandex_search: пустой rawData в ответе")
+            return []
+        try:
+            xml_bytes = base64.b64decode(raw_b64)
+            xml_text = xml_bytes.decode("utf-8", errors="replace")
+        except (binascii.Error, UnicodeDecodeError) as e:
+            log.warning("yandex_search: ошибка декодирования base64: %s", e)
+            return []
+
+        items = _parse_yandex_search_xml(xml_text)
         for it in items:
             it["query"] = query
         return items
