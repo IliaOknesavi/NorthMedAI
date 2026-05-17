@@ -10,11 +10,19 @@ from __future__ import annotations
 import logging
 import random
 import re
+import socket
 import time
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# ВАЖНО: youtube-transcript-api внутри использует requests.get(...) без явного
+# timeout. Если YouTube ресетит TCP и потом «зависает» на новом connect/read,
+# наш процесс может висеть БЕСКОНЕЧНО (видели вживую 7+ минут). Глобальный
+# socket-таймаут — единственный способ это обрубить, потому что requests
+# не имеет session-уровневого timeout API.
+socket.setdefaulttimeout(20.0)
 
 from youtube_transcript_api import (
     YouTubeTranscriptApi,
@@ -33,9 +41,11 @@ USER_AGENT = (
 )
 
 # Сколько раз перепробуем при сетевых сбоях (Connection reset, таймауты, 5xx).
-MAX_ATTEMPTS = 4
+MAX_ATTEMPTS = 3
 # База бэкоффа в секундах; на k-ой попытке ждём 2^k * BASE + джиттер.
 BACKOFF_BASE_S = 0.8
+# Per-request timeout по умолчанию. Применяется через monkey-patch session.request.
+PER_REQUEST_TIMEOUT_S = 15.0
 
 
 def _build_session() -> requests.Session:
@@ -48,10 +58,10 @@ def _build_session() -> requests.Session:
         }
     )
     retry = Retry(
-        total=3,
-        connect=3,
-        read=3,
-        status=3,
+        total=2,             # 2 retry внутри одной нашей попытки достаточно
+        connect=2,
+        read=2,
+        status=2,
         backoff_factor=0.5,
         status_forcelist=(429, 500, 502, 503, 504),
         allowed_methods=frozenset(["GET", "POST"]),
@@ -60,6 +70,18 @@ def _build_session() -> requests.Session:
     adapter = HTTPAdapter(max_retries=retry, pool_connections=4, pool_maxsize=8)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
+
+    # Monkey-patch: добавляем дефолтный timeout к каждому запросу через эту
+    # session. Иначе библиотека youtube-transcript-api вызывает requests
+    # БЕЗ timeout, и сокет может висеть до socket.setdefaulttimeout (20s),
+    # что всё ещё долго при unhappy path.
+    _orig_request = session.request
+
+    def _request_with_timeout(method, url, **kwargs):
+        kwargs.setdefault("timeout", PER_REQUEST_TIMEOUT_S)
+        return _orig_request(method, url, **kwargs)
+
+    session.request = _request_with_timeout  # type: ignore[assignment]
     return session
 
 
