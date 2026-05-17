@@ -16,8 +16,8 @@ from __future__ import annotations
 # minor — правки текста промпта.
 STANCE_VERSION = "stance-v0.3"
 QUERY_FORMER_VERSION = "qf-v0.2"
-CONFLICT_CLASSIFIER_VERSION = "cc-v0.1"
-JUDGE_VERSION = "judge-v0.4"
+CONFLICT_CLASSIFIER_VERSION = "cc-v0.2"
+JUDGE_VERSION = "judge-v0.5"
 QA_VERSION = "qa-v0.3"
 
 # Композитная версия Retriever: query_former + conflict_classifier.
@@ -228,15 +228,57 @@ SYSTEM_PROMPT_QUERY_FORMER = """Ты — помощник медицинског
 
 
 # SYSTEM_PROMPT_CONFLICT_CLASSIFIER — мини-промпт на supports/contradicts/neutral.
-SYSTEM_PROMPT_CONFLICT_CLASSIFIER = """Ты классифицируешь короткий медицинский snippet относительно конкретного
-утверждения. Отвечай одним словом из трёх: supports / contradicts / neutral.
+SYSTEM_PROMPT_CONFLICT_CLASSIFIER = """Ты классифицируешь короткий медицинский snippet (заголовок + 1-3 предложения)
+относительно конкретного утверждения из видео. Отвечай ОДНИМ словом из трёх:
+supports / contradicts / neutral.
 
-- supports   — snippet прямо подтверждает или согласуется с утверждением.
-- contradicts — snippet прямо опровергает или противоречит утверждению.
-- neutral    — snippet про ту же тему, но не отвечает на вопрос
-              (например, обзорная статья без явного вывода).
+ПРАВИЛА:
+- supports    — содержание snippet'а согласуется с утверждением, либо в нём
+                есть факт/цифра/вывод исследования, поддерживающий тезис.
+                НЕ требуется буквального повторения утверждения — достаточно
+                совпадения направления связи (тот же препарат → тот же исход).
+- contradicts — содержание snippet'а противоречит утверждению по направлению
+                связи (отсутствие эффекта, обратный эффект, побочный эффект
+                там где обещают пользу, опровержение мифа).
+- neutral     — snippet про ту же тему, но реально НЕ касается вопроса:
+                методология, эпидемиология «вообще», описательная статья без
+                вывода, заметка о финансировании, статья из совершенно
+                другой подгруппы пациентов.
 
-Никаких объяснений. Только одно слово."""
+НЕ СВАЛИВАЙСЯ в neutral по умолчанию. Если у snippet'а есть направление
+(положительный/отрицательный исход, эффект/отсутствие эффекта, риск/польза),
+ставь supports или contradicts — даже если формулировка не дословная.
+Сомневаешься в направлении → читай заголовок: он обычно содержит вывод
+(«… is not effective …», «… increases risk …», «… no benefit …»).
+
+ПРИМЕРЫ:
+
+Claim: «Витамин C лечит простуду»
+Snippet: «Cochrane review (2023): regular vitamin C reduces cold duration
+by 8% in adults; no evidence of effect on prevention or severity.»
+→ contradicts (не «лечит», только сокращение длительности на 8%)
+
+Claim: «Сода (бикарбонат натрия) перорально лечит рак»
+Snippet: «No scientific evidence supports sodium bicarbonate as a cancer
+treatment; American Cancer Society warns against this practice.»
+→ contradicts
+
+Claim: «Гомеопатические препараты эффективны против ОРВИ»
+Snippet: «Meta-analysis of 14 RCTs found no effect of homeopathy beyond
+placebo in upper respiratory infections.»
+→ contradicts
+
+Claim: «Витамин D снижает риск депрессии»
+Snippet: «Several observational studies report inverse correlation between
+serum 25(OH)D levels and depressive symptoms in adults.»
+→ supports (есть корреляция, поддерживает направление)
+
+Claim: «Куркума лечит артрит»
+Snippet: «Curcumin pharmacokinetics: poor bioavailability, rapid hepatic
+metabolism, large inter-individual variation.»
+→ neutral (про фармакокинетику, не про лечение артрита)
+
+Никаких объяснений в ответе. Только одно слово."""
 
 
 # SYSTEM_PROMPT_JUDGE — соответствует docs/PROMPTS.md → Judge.
@@ -293,14 +335,26 @@ SYSTEM_PROMPT_JUDGE = """Ты — судья медицинского фактч
 "false", а ты ставишь "misleading" из-за supports с оговоркой) —
 обязательно отметь это в `judge_notes`: «Скорректирован экстрактор: ...».
 
+ПЕРЕСМОТР NEUTRAL-ИСТОЧНИКОВ:
+Conflict Classifier работает на очень коротких snippet'ах (150-300 символов)
+и часто перестраховывается, помечая релевантные источники как "neutral".
+Если ты видишь в neutral-блоке source, чей snippet/заголовок ЯВНО
+указывает на направление (поддержка или опровержение claim'а) — относись
+к нему как к supports/contradicts соответственно, и упомяни его в
+explanation. Это не «выдумывание фактов», а корректировка излишней
+осторожности предыдущего агента; ты работаешь на yandexgpt-5.1, у тебя
+больше контекста и ты видишь весь набор source'ов разом.
+
+В таком случае в `judge_notes` напиши «Пересмотрено: source [N] из
+neutral → contradicts/supports по тексту snippet'а».
+
 ДОПОЛНИТЕЛЬНЫЕ ПРАВИЛА:
-- ВАЖНО про unverifiable: если ВСЕ source'ы помечены "neutral" (ни один
-  не supports, ни один не contradicts), это значит ретривер нашёл
-  тематические статьи, но ни одна не отвечает на наш конкретный
-  вопрос. ВЕРДИКТ В ЭТОМ СЛУЧАЕ — "unverifiable", даже если экстрактор
-  был уверен в "false". Без supports/contradicts мы не имеем права
-  делать вывод; обязанность Judge — отразить это пользователю честно,
-  а не догадываться по теме статей.
+- ВАЖНО про unverifiable: если после пересмотра ВСЕ source'ы остаются
+  без явного направления (нет ни одного, чей snippet/заголовок реально
+  отвечает на вопрос), это значит ретривер нашёл тематические статьи,
+  но по делу там ничего нет. ВЕРДИКТ В ЭТОМ СЛУЧАЕ — "unverifiable",
+  даже если экстрактор был уверен в "false". Обязанность Judge —
+  отразить это пользователю честно, а не догадываться по теме статей.
 - Если type=sophism — verdict остаётся "false" независимо от источников,
   потому что логическая уловка остаётся уловкой. Источники в этом случае
   опровергают сам факт, а не структуру уловки.
