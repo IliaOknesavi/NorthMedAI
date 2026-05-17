@@ -15,7 +15,7 @@ from __future__ import annotations
 # Формат: <agent>-v<MAJOR>.<MINOR>. Major — несовместимый формат I/O,
 # minor — правки текста промпта.
 STANCE_VERSION = "stance-v0.3"
-QUERY_FORMER_VERSION = "qf-v0.1"
+QUERY_FORMER_VERSION = "qf-v0.2"
 CONFLICT_CLASSIFIER_VERSION = "cc-v0.1"
 JUDGE_VERSION = "judge-v0.3"
 QA_VERSION = "qa-v0.3"
@@ -177,14 +177,32 @@ SYSTEM_PROMPT_QUERY_FORMER = """Ты — помощник медицинског
   источниках (форумы, отзывы, альтернативная медицина). Заполняй когда
   тема резонансная (БАДы, гомеопатия, эзотерика).
 - НЕ копируй утверждение целиком в запрос. Извлекай предметную область
-  и формулируй нейтрально: «вакцины ВЫЗЫВАЮТ аутизм» → "vaccine autism
-  epidemiology" (нейтрально), а не "vaccines cause autism" (предвзято).
-- НЕ добавляй вердикт в запрос. Запрос должен быть таким, чтобы
-  одинаково ловил и подтверждение, и опровержение.
+  и формулируй коротко (2-5 слов).
 - Если claim — это софизм (логическая уловка типа «все врачи скрывают»),
   то ищем подтверждение/опровержение ФАКТА, лежащего в основе:
   «все врачи скрывают, что чеснок лечит простуду» → ищем "garlic common
   cold treatment efficacy".
+
+ВАЖНО про verdict экстрактора:
+- Если verdict экстрактора = "false" (известная псевдонаука: гомеопатия,
+  «память воды», антипрививочники, плоская земля, очищение организма
+  содой, биорезонанс и т.п.) — нейтральные запросы вроде "water memory
+  scientific evidence" находят общие статьи про воду, а не разоблачения.
+  В таких случаях ОБЯЗАТЕЛЬНО делай ДВА запроса на каждый сильный
+  источник (pubmed/who/cdc_nejm/minzdrav):
+    (a) нейтральный — "water memory homeopathy"
+    (b) скептический — добавь к нейтральному термин из:
+        "systematic review", "meta-analysis", "Cochrane review",
+        "no effect", "placebo controlled", "retracted", "debunked",
+        "pseudoscience", "evidence base"
+  Пример для «память воды»:
+    pubmed: ["water memory homeopathy", "homeopathy meta-analysis no effect"]
+    who:    ["homeopathy evidence", "homeopathy systematic review"]
+  Пример для «вакцины вызывают аутизм»:
+    pubmed: ["vaccine autism epidemiology", "MMR autism meta-analysis"]
+- Если verdict экстрактора = "misleading" — нейтральные запросы достаточно,
+  без скептических модификаторов.
+- Если verdict = "sophism" — ищем по предметной области, обычные запросы.
 
 ФОРМАТ ОТВЕТА — строго валидный JSON, без markdown-обёртки, без
 комментариев. Поле `claim_index` обязательно и соответствует индексу
