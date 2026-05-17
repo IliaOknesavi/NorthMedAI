@@ -44,7 +44,7 @@
       backend_hint:   "По умолчанию http://localhost:8000",
       reset_label:    "Сбросить настройки",
       reset_btn:      "Сбросить",
-      about:          "NorthMedAI · хакатон Яндекс AI",
+      // about удалён по просьбе пользователя
 
       // Ошибки
       err_connection_reset: "YouTube временно сбросил соединение. Подождите 30–60 секунд и нажмите «Перепроверить».",
@@ -88,7 +88,7 @@
       backend_hint:   "Default: http://localhost:8000",
       reset_label:    "Reset settings",
       reset_btn:      "Reset",
-      about:          "NorthMedAI · Yandex AI hackathon",
+      // about removed
 
       err_connection_reset: "YouTube reset the connection. Wait 30–60 seconds and click Re-check.",
       err_no_subtitles:     "This video has no subtitles — analysis is unavailable.",
@@ -114,14 +114,12 @@
   }
 
   window.NMAI_I18N = {
-    /** Получить строку. lang — "ru"|"en", key — ключ словаря, params — {n: 5}. */
     t(lang, key, params = {}) {
       const lex = dict[lang] || dict.ru;
       const tpl = lex[key] ?? dict.ru[key] ?? key;
       return format(tpl, params);
     },
 
-    /** Перевод количества меток с плюрализацией. */
     claimsCount(lang, n) {
       if (n === 0) return this.t(lang, "claims_zero");
       const form = plural(n, lang);

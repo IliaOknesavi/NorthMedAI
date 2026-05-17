@@ -38,18 +38,18 @@
     }
 
     .logo-img {
-    width: 70px;
-    height: 70px;
-    border-radius: 8px;   /* можно чуть больше скругление */
-    object-fit: contain;
+      width: 70px;
+      height: 70px;
+      border-radius: 8px;
+      object-fit: contain;
     }
 
     .header {
-    display: flex;
-    align-items: center;
-    gap: 6px;            /* было 10px – увеличиваем под лого */
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border);
     }
     .header-text {
       flex: 1;
@@ -90,7 +90,6 @@
       color: var(--text);
     }
 
-    /* Основное содержимое */
     .body {
       padding: 14px 16px 16px;
       display: flex;
@@ -98,7 +97,6 @@
       gap: 14px;
     }
 
-    /* Статус-карточка */
     .status-card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -164,7 +162,6 @@
       margin-top: 2px;
     }
 
-    /* Свитч */
     .switch {
       position: relative;
       width: 36px;
@@ -206,7 +203,6 @@
       cursor: not-allowed;
     }
 
-    /* Три плитки */
     .tiles {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
@@ -249,7 +245,6 @@
       font-weight: 500;
     }
 
-    /* Блок тумблеров (тики, голос) */
     .toggles {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -285,7 +280,6 @@
       text-transform: uppercase;
     }
 
-    /* Кнопки действия */
     .actions {
       display: flex;
       gap: 10px;
@@ -324,7 +318,6 @@
       cursor: not-allowed;
     }
 
-    /* Панель настроек (без бэкенда) */
     .settings-panel {
       position: absolute;
       top: 0;
@@ -401,12 +394,7 @@
       border-color: var(--accent);
       color: var(--accent);
     }
-    .about {
-      margin-top: 8px;
-      font-size: 10px;
-      text-align: center;
-      color: var(--muted-2);
-    }
+    /* Блок about удалён */
     #root {
       position: relative;
     }
@@ -414,10 +402,8 @@
 </head>
 <body>
 <div id="root">
-  <!-- Главный вид -->
   <div id="main-view">
     <div class="header">
-      <!-- Логотип из изображения -->
       <img class="logo-img" src="logo.png" alt="NorthMedAI">
       <div class="header-text">
         <div class="title">NorthMedAI</div>
@@ -504,7 +490,6 @@
         <label data-i18n="reset_label"></label>
         <button class="btn-secondary" id="reset-btn" style="width:100%" data-i18n="reset_btn"></button>
       </div>
-      <div class="about" data-i18n="about"></div>
     </div>
   </div>
 </div>
