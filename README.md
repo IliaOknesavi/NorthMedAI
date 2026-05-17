@@ -24,7 +24,7 @@
    │
    ▼
 1. Extractor         — извлекает спорные claim'ы (YandexGPT 5.1)
-2. Stance Detector   — silently drop'ает claim'ы, которые автор сам разбирает
+2. Stance Detector   — незаметно отбрасывает claim'ы, которые автор разбирает самостоятельно
 3. Query Former v0.2 — формирует поисковые запросы (+ скептические для verdict=false)
 4. Retriever         — параллельно зовёт 6 source-адаптеров
 5. Conflict Class.   — для каждого source: supports/contradicts/neutral
