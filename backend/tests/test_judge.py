@@ -75,7 +75,7 @@ def test_unverifiable_caps_confidence(monkeypatch: pytest.MonkeyPatch) -> None:
     """unverifiable → confidence ≤ 0.4 (sanity-check в коде)."""
     out = """{
       "verdict": "unverifiable",
-      "explanation": "Не удалось проверить: ...",
+      "explanation": "Нет подтверждений: ...",
       "confidence": 0.95,
       "selected_sources": []
     }"""

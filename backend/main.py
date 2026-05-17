@@ -152,7 +152,10 @@ def _filter_for_overlay(claims: list[dict]) -> list[dict]:
     «Не удалось проверить:»).
 
     Расширению нужно отрисовать этот verdict отдельным стилем (серый
-    нейтральный) — см. extension/content_script.js.
+    нейтральный) — см. extension/content_script.js. Формулировка
+    explanation у unverifiable начинается с «Нет подтверждений:» —
+    смысловой акцент на самом claim'е («утверждение не подкреплено
+    источниками»), а не на нас («мы не нашли»).
     """
     return list(claims)
 

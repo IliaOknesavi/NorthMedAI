@@ -279,10 +279,13 @@
         background: rgba(138, 180, 248, 0.85);
         animation: nmai-pulse-slow 2s ease-in-out infinite;
       }
-      /* unverifiable — приглушённый серый, без пульсации.
-         Сообщает «нет источников» без визуального давления. */
+      /* unverifiable — визуально идентично misleading (жёлтый с медленной
+         пульсацией). Семантика разная (нет подтверждений vs. подача
+         вводит в заблуждение), но для зрителя оба сигнала одного класса
+         «надо обратить внимание». */
       #nmai-badge.unverifiable {
-        background: rgba(180, 184, 196, 0.78);
+        background: rgba(253, 214, 99, 0.85);
+        animation: nmai-pulse-slow 2s ease-in-out infinite;
       }
 
       @keyframes nmai-pulse-slow {
@@ -328,7 +331,9 @@
       .nmai-pill.false        { background: rgba(242,139,130,0.18); color: #f28b82; }
       .nmai-pill.misleading   { background: rgba(253,214,99,0.18);  color: #fdd663; }
       .nmai-pill.sophism      { background: rgba(183,148,246,0.18); color: #b794f6; }
-      .nmai-pill.unverifiable { background: rgba(180,184,196,0.18); color: #b4b8c4; }
+      /* unverifiable идёт в той же категории «спорные» что и misleading —
+         визуально (жёлтый) и по счётчику в попапе. */
+      .nmai-pill.unverifiable { background: rgba(253,214,99,0.18);  color: #fdd663; }
 
       .nmai-claim {
         font-weight: 700;
@@ -469,7 +474,7 @@
       .nmai-tick.false        { background: #f28b82; }
       .nmai-tick.misleading   { background: #fdd663; }
       .nmai-tick.sophism      { background: #8ab4f8; }
-      .nmai-tick.unverifiable { background: #b4b8c4; }
+      .nmai-tick.unverifiable { background: #fdd663; }
     `;
     document.head.appendChild(s);
   }
@@ -642,10 +647,9 @@
     }
     badge.className = `visible ${tickClass(claim)}`;
     badge.textContent =
-        claim.type === "sophism"          ? "💬"
-      : claim.verdict === "false"         ? "✗"
-      : claim.verdict === "unverifiable"  ? "?"
-      :                                     "⚠";
+        claim.type === "sophism"   ? "💬"
+      : claim.verdict === "false"  ? "✗"
+      :                              "⚠";   // misleading + unverifiable = ⚠
     console.log("[NMAI] показан бейдж для claim @", claim.start, "s:", claim.text.slice(0, 60));
   }
 
@@ -700,8 +704,7 @@
     const pillLabel =
         claim.type === "sophism"           ? "Логическая ошибка"
       : claim.verdict === "false"          ? "Ложное утверждение"
-      : claim.verdict === "unverifiable"   ? "Нет источников"
-      :                                      "Спорное утверждение";
+      :                                      "Спорное утверждение";   // misleading + unverifiable
 
     // экранируем чтобы кавычки/угловые скобки из текста не сломали разметку
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({

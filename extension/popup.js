@@ -221,7 +221,14 @@ function handleResponse(resp) {
 
 function showCounts(claims) {
   const f = claims.filter(c => c.verdict === "false").length;
-  const d = claims.filter(c => c.verdict === "misleading" || c.verdict === "conflicting").length;
+  // «Спорные» включают misleading, conflicting и unverifiable.
+  // unverifiable — это claim'ы без авторитетных подтверждений,
+  // для зрителя они проходят в той же категории «надо обратить внимание».
+  const d = claims.filter(c =>
+    c.verdict === "misleading" ||
+    c.verdict === "conflicting" ||
+    c.verdict === "unverifiable"
+  ).length;
   const s = claims.filter(c => c.type === "sophism").length;
 
   els.countFalse.textContent    = f;
