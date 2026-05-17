@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 log = logging.getLogger("db.migrations")
 
@@ -139,24 +139,29 @@ MIGRATIONS: list[tuple[str, str, bool]] = [
 ]
 
 
-async def apply_inplace_migrations(conn: AsyncConnection) -> None:
+async def apply_inplace_migrations(engine: AsyncEngine) -> None:
     """Прогоняет все миграции по порядку. Безопасно повторно вызывать.
 
+    Каждая миграция выполняется в СВОЕЙ транзакции. Это важно, потому что
+    если optional-миграция (например, pgvector) падает в Postgres, текущая
+    транзакция помечается как aborted, и все последующие SQL в той же
+    транзакции тоже валятся (`current transaction is aborted`). Изоляция
+    через engine.begin() на каждую миграцию решает это.
+
     `optional=True` миграции при сбое не блокируют startup — пишут WARNING
-    и переходят к следующей. Используется для RAG-расширения, которое
-    зависит от pgvector в Postgres-инстансе.
+    и переходят к следующей.
     """
+    if engine.dialect.name != "postgresql":
+        # На SQLite (юнит-тесты) `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+        # не поддерживается, миграции там не нужны — create_all уже создаст
+        # таблицы с нужными колонками из models.py.
+        log.debug("migrations: пропускаю — диалект %s", engine.dialect.name)
+        return
+
     for name, sql, optional in MIGRATIONS:
-        # Если БД на SQLite (например, в юнит-тестах) — `ALTER TABLE ... ADD
-        # COLUMN IF NOT EXISTS` не поддерживается. Пропускаем тихо: в тестах
-        # на чистой SQLite-базе таблицы создаются `create_all` уже с нужными
-        # колонками из models.py, миграции там не нужны.
-        dialect = conn.dialect.name
-        if dialect != "postgresql":
-            log.debug("migrations: пропускаю %s — диалект %s", name, dialect)
-            continue
         try:
-            await conn.execute(text(sql))
+            async with engine.begin() as conn:
+                await conn.execute(text(sql))
             log.info("migration applied: %s", name)
         except Exception:  # noqa: BLE001
             if optional:
@@ -180,8 +185,7 @@ if __name__ == "__main__":
 
     async def _main() -> None:
         logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-        async with engine.begin() as conn:
-            await apply_inplace_migrations(conn)
+        await apply_inplace_migrations(engine)
         await engine.dispose()
 
     asyncio.run(_main())

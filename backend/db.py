@@ -50,11 +50,13 @@ async def init_db() -> None:
     """Создаёт таблицы при первом запуске и накатывает in-place миграции.
     Идемпотентно — безопасно вызывать на каждом старте.
     """
+    # 1) на чистой БД — создаём таблицы со всеми колонками из models.py.
     async with engine.begin() as conn:
-        # 1) на чистой БД — создаём таблицы со всеми колонками из models.py
         await conn.run_sync(Base.metadata.create_all)
-        # 2) на существующей БД — добавляем только новые колонки (ADD COLUMN IF NOT EXISTS)
-        await apply_inplace_migrations(conn)
+    # 2) миграции для существующей БД. Изолированы в своих транзакциях —
+    # см. apply_inplace_migrations: optional-миграции (pgvector) могут упасть,
+    # но это не отравит транзакцию для последующих обязательных миграций.
+    await apply_inplace_migrations(engine)
     log.info("init_db: схема готова (%s)", _safe_url())
 
 
