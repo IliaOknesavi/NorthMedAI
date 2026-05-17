@@ -279,6 +279,11 @@
         background: rgba(138, 180, 248, 0.85);
         animation: nmai-pulse-slow 2s ease-in-out infinite;
       }
+      /* unverifiable — приглушённый серый, без пульсации.
+         Сообщает «нет источников» без визуального давления. */
+      #nmai-badge.unverifiable {
+        background: rgba(180, 184, 196, 0.78);
+      }
 
       @keyframes nmai-pulse-slow {
         0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.3); }
@@ -320,9 +325,10 @@
         letter-spacing: 0.5px;
         margin-bottom: 10px;
       }
-      .nmai-pill.false      { background: rgba(242,139,130,0.18); color: #f28b82; }
-      .nmai-pill.misleading { background: rgba(253,214,99,0.18); color: #fdd663; }
-      .nmai-pill.sophism    { background: rgba(183,148,246,0.18); color: #b794f6; }
+      .nmai-pill.false        { background: rgba(242,139,130,0.18); color: #f28b82; }
+      .nmai-pill.misleading   { background: rgba(253,214,99,0.18);  color: #fdd663; }
+      .nmai-pill.sophism      { background: rgba(183,148,246,0.18); color: #b794f6; }
+      .nmai-pill.unverifiable { background: rgba(180,184,196,0.18); color: #b4b8c4; }
 
       .nmai-claim {
         font-weight: 700;
@@ -460,9 +466,10 @@
         pointer-events: none;
         box-shadow: 0 0 4px rgba(0,0,0,0.5);
       }
-      .nmai-tick.false      { background: #f28b82; }
-      .nmai-tick.misleading { background: #fdd663; }
-      .nmai-tick.sophism    { background: #8ab4f8; }
+      .nmai-tick.false        { background: #f28b82; }
+      .nmai-tick.misleading   { background: #fdd663; }
+      .nmai-tick.sophism      { background: #8ab4f8; }
+      .nmai-tick.unverifiable { background: #b4b8c4; }
     `;
     document.head.appendChild(s);
   }
@@ -557,6 +564,7 @@
   function tickClass(c) {
     if (c.type === "sophism") return "sophism";
     if (c.verdict === "false") return "false";
+    if (c.verdict === "unverifiable") return "unverifiable";
     return "misleading";
   }
 
@@ -633,7 +641,11 @@
       return;
     }
     badge.className = `visible ${tickClass(claim)}`;
-    badge.textContent = claim.type === "sophism" ? "💬" : claim.verdict === "false" ? "✗" : "⚠";
+    badge.textContent =
+        claim.type === "sophism"          ? "💬"
+      : claim.verdict === "false"         ? "✗"
+      : claim.verdict === "unverifiable"  ? "?"
+      :                                     "⚠";
     console.log("[NMAI] показан бейдж для claim @", claim.start, "s:", claim.text.slice(0, 60));
   }
 
@@ -686,9 +698,10 @@
 
     const pillClass = tickClass(claim);
     const pillLabel =
-      claim.type === "sophism" ? "Логическая ошибка"
-      : claim.verdict === "false" ? "Ложное утверждение"
-      : "Спорное утверждение";
+        claim.type === "sophism"           ? "Логическая ошибка"
+      : claim.verdict === "false"          ? "Ложное утверждение"
+      : claim.verdict === "unverifiable"   ? "Нет источников"
+      :                                      "Спорное утверждение";
 
     // экранируем чтобы кавычки/угловые скобки из текста не сломали разметку
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({

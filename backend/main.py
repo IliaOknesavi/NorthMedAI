@@ -142,12 +142,19 @@ async def _fetch_transcript_or_4xx(video_id: str) -> list[dict]:
 
 def _filter_for_overlay(claims: list[dict]) -> list[dict]:
     """
-    Что доходит до content_script.js:
-    - убираем verdict='unverifiable' — судья не уверен, пользователю не показываем
-      (но claim сохранён в БД и виден в /video/{id}/history для дебага).
-    См. docs/RAG_ARCHITECTURE.md §4.5.
+    Что доходит до content_script.js — все verdict'ы, включая `unverifiable`.
+
+    Раньше мы дропали unverifiable, считая что «неуверенное» не нужно
+    показывать. На P1 решение пересмотрено (см. диалог 2026-05-17):
+    отсутствие достоверных источников — это сам по себе полезный сигнал
+    для пользователя. Метка показывается с пометкой «нет источников,
+    подтверждающих это утверждение» (explanation начинается с
+    «Не удалось проверить:»).
+
+    Расширению нужно отрисовать этот verdict отдельным стилем (серый
+    нейтральный) — см. extension/content_script.js.
     """
-    return [c for c in claims if c.get("verdict") != "unverifiable"]
+    return list(claims)
 
 
 def _payload_from_analysis(
