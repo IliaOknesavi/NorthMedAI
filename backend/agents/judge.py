@@ -96,6 +96,60 @@ def _extract_json(raw: str) -> dict[str, Any]:
     return {}
 
 
+# --- Нормализатор префикса explanation ----------------------------------
+#
+# Promo'му мы говорим начинать с одного из 4 префиксов соответственно
+# вердикту. Модель часто промахивается: ставит "Неверно:" при vердикте
+# unverifiable, "Нет научных доказательств..." без префикса вообще и т.п.
+# Чиним детерминированно после LLM.
+
+_VERDICT_PREFIX: dict[str, str] = {
+    "false":        "Неверно:",
+    "misleading":   "Вводит в заблуждение:",
+    "conflicting":  "Неоднозначно:",
+    "unverifiable": "Нет подтверждений:",
+}
+
+# Любой из этих префиксов в начале мы умеем срезать, чтобы поставить
+# правильный согласно verdict. Регистронезависимо.
+_KNOWN_PREFIXES = (
+    "Неверно:",
+    "Вводит в заблуждение:",
+    "Неоднозначно:",
+    "Нет подтверждений:",
+    # частые отписочные варианты от модели — тоже срезаем, добавим свой
+    "Нет научных доказательств:",
+    "Нет научных подтверждений:",
+    "Нет данных:",
+    "Недостаточно информации:",
+)
+
+
+def _normalize_explanation_prefix(verdict: str, explanation: str) -> str:
+    """Гарантирует, что explanation начинается с правильного префикса
+    согласно verdict. Любой ранее проставленный префикс отрезается."""
+    expl = (explanation or "").strip()
+    if not expl:
+        return _VERDICT_PREFIX.get(verdict, "") + " " if verdict in _VERDICT_PREFIX else ""
+
+    # Срезаем любой известный префикс (регистронезависимо, тримим хвост от ", ", " — " и т.п.)
+    lower = expl.lower()
+    for pref in _KNOWN_PREFIXES:
+        if lower.startswith(pref.lower()):
+            expl = expl[len(pref):].lstrip(" \t—-:,.")
+            break
+
+    target_prefix = _VERDICT_PREFIX.get(verdict)
+    if not target_prefix:
+        return expl
+    # Если после среза ничего не осталось — оставим только префикс.
+    if not expl:
+        return target_prefix
+    # Капитализируем первую букву после префикса для аккуратности.
+    expl = expl[0].upper() + expl[1:] if expl else expl
+    return f"{target_prefix} {expl}"
+
+
 # --- Форматирование входа -----------------------------------------------
 
 def _group_sources_by_stance(
@@ -248,6 +302,7 @@ async def judge(
 
     verdict: FinalVerdict = verdict_raw  # type: ignore[assignment]
     explanation = str(data.get("explanation") or raw.get("explanation", ""))[:2000]
+    explanation = _normalize_explanation_prefix(verdict, explanation)
     judge_notes = str(data.get("judge_notes") or "")[:1000]
     try:
         confidence = float(data.get("confidence", raw.get("confidence", 0.5)))
