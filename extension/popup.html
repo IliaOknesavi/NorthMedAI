@@ -5,123 +5,208 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NorthMedAI</title>
   <style>
-    :root {
-      --bg:        #0d1018;
-      --surface:   #131722;
-      --surface-2: #1a1f2c;
-      --border:    #242a38;
-      --text:      #e8eaed;
-      --muted:     #8a90a0;
-      --muted-2:   #5b6172;
-
-      --accent:    #4f8ef7;
-      --accent-2:  #3d7de8;
-      --good:      #66d9b1;
-      --warn:      #fdd663;
-      --bad:       #f28b82;
-      --purple:    #b794f6;
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:        #0f1117;
+      --surface:   #161b22;
+      --surface-2: #1e242c;
+      --border:    #2d333b;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --muted-2:   #5c6570;
 
-    html, body {
+      --accent:    #2f81f7;
+      --accent-2:  #1f6feb;
+      --good:      #3fb950;
+      --warn:      #d29922;
+      --bad:       #f85149;
+      --purple:    #bc8cff;
+    }
+
+    body {
       width: 340px;
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text", sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", sans-serif;
       font-size: 13px;
       line-height: 1.4;
     }
 
-    /* ─── Header ─────────────────────────────────────────────────────────── */
+    .logo-img {
+    width: 70px;
+    height: 70px;
+    border-radius: 8px;   /* можно чуть больше скругление */
+    object-fit: contain;
+    }
+
     .header {
+    display: flex;
+    align-items: center;
+    gap: 6px;            /* было 10px – увеличиваем под лого */
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    }
+    .header-text {
+      flex: 1;
+    }
+    .title {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.2px;
+    }
+    .subtitle {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .header-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .icon-btn {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 14px 16px 12px;
-      border-bottom: 1px solid var(--border);
+      justify-content: center;
+      color: var(--muted);
+      transition: all 0.2s;
+      font-size: 15px;
+      font-weight: 500;
     }
-    .logo {
-      width: 28px; height: 28px;
-      border-radius: 8px;
-      background: linear-gradient(135deg, #4f8ef7, #66d9b1);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 14px;
-      flex-shrink: 0;
+    .icon-btn:hover {
+      background: var(--surface-2);
+      color: var(--text);
     }
-    .header-text { display: flex; flex-direction: column; gap: 2px; }
-    .title    { font-size: 14px; font-weight: 600; color: #fff; }
-    .subtitle { font-size: 11px; color: var(--muted); }
 
-    /* ─── Status card ─────────────────────────────────────────────────────── */
+    /* Основное содержимое */
     .body {
       padding: 14px 16px 16px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 14px;
     }
 
+    /* Статус-карточка */
     .status-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 14px;
+      padding: 12px;
       display: flex;
       align-items: center;
       gap: 12px;
+      transition: border-color 0.2s;
     }
-    .status-card.on { border-color: rgba(102, 217, 177, 0.3); background: linear-gradient(180deg, rgba(102,217,177,0.08), transparent 70%), var(--surface); }
-    .status-card.off { opacity: 0.85; }
-    .status-card.checking { border-color: rgba(79,142,247,0.35); }
-
+    .status-card.on {
+      border-color: rgba(63, 185, 80, 0.3);
+      background: linear-gradient(180deg, rgba(63,185,80,0.08), transparent 70%), var(--surface);
+    }
+    .status-card.off {
+      opacity: 0.85;
+    }
+    .status-card.checking {
+      border-color: rgba(47, 129, 247, 0.4);
+    }
     .status-icon {
-      width: 36px; height: 36px;
+      width: 36px;
+      height: 36px;
       border-radius: 50%;
       background: var(--surface-2);
-      display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       position: relative;
     }
-    .status-icon .dot {
-      width: 10px; height: 10px; border-radius: 50%;
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
       background: var(--muted-2);
     }
-    .status-card.on  .status-icon .dot { background: var(--good); box-shadow: 0 0 8px rgba(102,217,177,0.6); }
+    .status-card.on .status-dot {
+      background: var(--good);
+      box-shadow: 0 0 8px var(--good);
+    }
     .status-card.checking .status-icon::after {
-      content: ""; position: absolute; inset: -3px;
+      content: "";
+      position: absolute;
+      inset: -3px;
       border: 2px solid transparent;
       border-top-color: var(--accent);
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .status-text {
+      flex: 1;
+    }
+    .status-title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .status-sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
 
-    .status-text { flex: 1; min-width: 0; }
-    .status-title { font-size: 13px; font-weight: 600; color: #fff; }
-    .status-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
-
-    /* ─── Switch (общий компонент) ────────────────────────────────────────── */
-    .switch { position: relative; width: 38px; height: 22px; flex-shrink: 0; cursor: pointer; }
-    .switch input { opacity: 0; width: 0; height: 0; }
+    /* Свитч */
+    .switch {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
     .slider {
-      position: absolute; inset: 0;
-      background: #2b3140;
-      border-radius: 22px;
+      position: absolute;
+      inset: 0;
+      background: #2d333b;
+      border-radius: 20px;
       transition: background 0.2s;
     }
     .slider::before {
-      content: ""; position: absolute;
-      width: 16px; height: 16px;
-      left: 3px; top: 3px;
-      background: #fff;
+      content: "";
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      left: 3px;
+      top: 3px;
+      background: white;
       border-radius: 50%;
-      transition: transform 0.2s, background 0.2s;
+      transition: transform 0.2s;
     }
-    .switch input:checked + .slider { background: var(--accent); }
-    .switch input:checked + .slider::before { transform: translateX(16px); }
-    .switch input:disabled + .slider { opacity: 0.5; cursor: not-allowed; }
+    .switch input:checked + .slider {
+      background: var(--accent);
+    }
+    .switch input:checked + .slider::before {
+      transform: translateX(16px);
+    }
+    .switch input:disabled + .slider {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
 
-    /* ─── Tiles ───────────────────────────────────────────────────────────── */
+    /* Три плитки */
     .tiles {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
@@ -131,128 +216,40 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 10px;
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
+      padding: 8px 6px;
+      text-align: center;
     }
-    .tile .tile-label {
+    .tile-label {
       font-size: 10px;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      display: flex; align-items: center; gap: 5px;
-    }
-    .tile .dot {
-      width: 6px; height: 6px; border-radius: 50%;
-    }
-    .tile.false   .dot { background: var(--bad); }
-    .tile.disputed .dot { background: var(--warn); }
-    .tile.sophism .dot { background: var(--purple); }
-    .tile .tile-value {
-      font-size: 22px;
-      font-weight: 700;
-      color: #fff;
-      line-height: 1.1;
-    }
-    .tile.zero .tile-value { color: var(--muted-2); font-weight: 600; }
-
-    /* ─── Pipeline card ──────────────────────────────────────────────────── */
-    .pipeline-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-    }
-    .pipeline-card[open] .pipeline-caret { transform: rotate(180deg); }
-
-    .pipeline-summary {
+      letter-spacing: 0.3px;
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      cursor: pointer;
-      list-style: none;
-      user-select: none;
-    }
-    .pipeline-summary::-webkit-details-marker { display: none; }
-    .pipeline-title {
-      flex: 1;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text);
-      letter-spacing: 0.2px;
-    }
-    .pipeline-time {
-      font-size: 11px;
-      color: var(--muted);
-      font-variant-numeric: tabular-nums;
-    }
-    .pipeline-caret {
-      font-size: 11px;
-      color: var(--muted);
-      transition: transform 0.2s;
-    }
-
-    .pipeline-body {
-      padding: 8px 14px 14px;
-      border-top: 1px solid var(--border);
-    }
-
-    .pipeline-funnel { display: flex; flex-direction: column; gap: 4px; }
-    .pipeline-stage {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 11px;
-      color: var(--text);
-      padding: 4px 0;
-    }
-    .pipeline-stage .stage-name { flex: 1; color: var(--muted); }
-    .pipeline-stage .stage-value {
-      font-variant-numeric: tabular-nums;
-      font-weight: 600;
-    }
-    .pipeline-stage .stage-bar {
-      flex: 0 0 60px;
-      height: 4px;
-      background: var(--surface-2);
-      border-radius: 2px;
-      overflow: hidden;
-    }
-    .pipeline-stage .stage-bar > span {
-      display: block;
-      height: 100%;
-      background: linear-gradient(90deg, #4f8ef7, #66d9b1);
-      border-radius: 2px;
-    }
-    .pipeline-stage.drop .stage-value { color: var(--muted); }
-    .pipeline-stage.drop .stage-bar > span { background: rgba(255,255,255,0.12); }
-
-    .pipeline-versions {
-      display: flex;
-      flex-wrap: wrap;
+      justify-content: center;
       gap: 4px;
-      margin-top: 10px;
-      padding-top: 10px;
-      border-top: 1px dashed var(--border);
     }
-    .pipeline-versions .ver-badge {
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 4px;
-      background: var(--surface-2);
-      color: var(--muted);
-      letter-spacing: 0.2px;
-      font-variant-numeric: tabular-nums;
+    .tile-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
     }
-    .pipeline-versions .ver-badge b {
-      color: var(--text);
-      margin-right: 4px;
-      font-weight: 600;
+    .tile.false .tile-dot { background: var(--bad); }
+    .tile.disputed .tile-dot { background: var(--warn); }
+    .tile.sophism .tile-dot { background: var(--purple); }
+    .tile-value {
+      font-size: 24px;
+      font-weight: 700;
+      margin-top: 4px;
+      line-height: 1.2;
+    }
+    .tile.zero .tile-value {
+      color: var(--muted-2);
+      font-weight: 500;
     }
 
-    /* ─── Toggles section ────────────────────────────────────────────────── */
+    /* Блок тумблеров (тики, голос) */
     .toggles {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -262,256 +259,256 @@
     .toggle-row {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 11px 14px;
+      justify-content: space-between;
+      padding: 10px 14px;
       border-bottom: 1px solid var(--border);
     }
-    .toggle-row:last-child { border-bottom: none; }
-    .toggle-row .label-block { flex: 1; min-width: 0; }
-    .toggle-row .lbl { font-size: 13px; color: var(--text); display: flex; align-items: center; gap: 6px; }
-    .toggle-row .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
-
-    .badge-soon {
-      display: inline-block;
-      font-size: 9px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      padding: 2px 5px;
-      border-radius: 4px;
-      background: var(--surface-2);
+    .toggle-row:last-child {
+      border-bottom: none;
+    }
+    .toggle-label {
+      font-weight: 500;
+    }
+    .toggle-sub {
+      font-size: 10px;
       color: var(--muted);
+      margin-top: 2px;
+    }
+    .badge-soon {
+      font-size: 9px;
+      font-weight: 600;
+      background: var(--surface-2);
+      padding: 2px 6px;
+      border-radius: 12px;
+      color: var(--muted);
+      margin-left: 6px;
+      text-transform: uppercase;
     }
 
-    /* ─── Buttons ─────────────────────────────────────────────────────────── */
-    .actions { display: flex; gap: 8px; }
+    /* Кнопки действия */
+    .actions {
+      display: flex;
+      gap: 10px;
+    }
     .btn {
       flex: 1;
-      font: inherit;
+      font-size: 12px;
       font-weight: 600;
-      font-size: 13px;
-      padding: 10px 12px;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: background 0.15s, opacity 0.15s, border-color 0.15s;
+      padding: 8px 12px;
+      border-radius: 8px;
       border: 1px solid transparent;
-      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
     }
-    .btn.primary  { background: var(--accent); color: #fff; }
-    .btn.primary:hover { background: var(--accent-2); }
-    .btn.ghost    { background: var(--surface); color: var(--text); border-color: var(--border); }
-    .btn.ghost:hover { background: var(--surface-2); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+    .btn-primary:hover {
+      background: var(--accent-2);
+    }
+    .btn-secondary {
+      background: var(--surface);
+      border-color: var(--border);
+      color: var(--text);
+    }
+    .btn-secondary:hover {
+      background: var(--surface-2);
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
 
-    /* ─── Settings panel (выезжает поверх) ───────────────────────────────── */
+    /* Панель настроек (без бэкенда) */
     .settings-panel {
       position: absolute;
-      inset: 0;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
       background: var(--bg);
       display: none;
       flex-direction: column;
+      z-index: 10;
     }
-    .settings-panel.open { display: flex; }
-
+    .settings-panel.open {
+      display: flex;
+    }
     .settings-header {
-      display: flex; align-items: center; gap: 10px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
       padding: 12px 16px;
       border-bottom: 1px solid var(--border);
     }
-    .settings-header .back-btn {
-      width: 28px; height: 28px;
-      border-radius: 8px;
+    .back-btn {
       background: var(--surface);
       border: 1px solid var(--border);
-      color: var(--text);
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      font-size: 18px;
       cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      font: inherit; font-size: 16px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
-    .settings-header .back-btn:hover { background: var(--surface-2); }
-    .settings-title { font-size: 14px; font-weight: 600; color: #fff; }
-
+    .back-btn:hover {
+      background: var(--surface-2);
+    }
+    .settings-title {
+      font-size: 14px;
+      font-weight: 600;
+    }
     .settings-body {
-      padding: 14px 16px;
-      display: flex; flex-direction: column; gap: 14px;
-      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
     }
-
-    .field { display: flex; flex-direction: column; gap: 6px; }
-    .field label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-    .field-hint { font-size: 11px; color: var(--muted-2); }
-
-    .lang-row { display: flex; gap: 8px; }
+    .field label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: block;
+      margin-bottom: 6px;
+    }
+    .lang-row {
+      display: flex;
+      gap: 8px;
+    }
     .lang-chip {
       flex: 1;
-      padding: 8px 10px;
-      border-radius: 8px;
       background: var(--surface);
       border: 1px solid var(--border);
-      color: var(--text);
-      font: inherit; font-size: 12px; font-weight: 600;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 12px;
+      font-weight: 600;
       cursor: pointer;
-      transition: background 0.15s, border-color 0.15s;
-    }
-    .lang-chip:hover { background: var(--surface-2); }
-    .lang-chip.active {
-      background: rgba(79,142,247,0.15);
-      border-color: var(--accent);
-      color: #fff;
-    }
-
-    input.text-input {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
       color: var(--text);
-      font: inherit; font-size: 12px;
-      padding: 8px 10px;
-      outline: none;
+      transition: all 0.15s;
     }
-    input.text-input:focus { border-color: var(--accent); }
-
+    .lang-chip.active {
+      background: rgba(47, 129, 247, 0.15);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
     .about {
-      margin-top: auto;
-      padding-top: 16px;
-      font-size: 11px;
-      color: var(--muted-2);
+      margin-top: 8px;
+      font-size: 10px;
       text-align: center;
+      color: var(--muted-2);
     }
-
-    /* Корневой контейнер становится position: relative — чтобы settings-panel мог быть absolute */
-    #root { position: relative; min-height: 100%; }
+    #root {
+      position: relative;
+    }
   </style>
 </head>
 <body>
-  <div id="root">
+<div id="root">
+  <!-- Главный вид -->
+  <div id="main-view">
+    <div class="header">
+      <!-- Логотип из изображения -->
+      <img class="logo-img" src="logo.png" alt="NorthMedAI">
+      <div class="header-text">
+        <div class="title">NorthMedAI</div>
+        <div class="subtitle" data-i18n="subtitle"></div>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="theme-header-btn" title="Сменить тему">🌓</button>
+        <button class="icon-btn" id="settings-header-btn" title="Настройки">⚙</button>
+      </div>
+    </div>
 
-    <!-- ─── Main view ──────────────────────────────────────────────────── -->
-    <div id="main-view">
-      <div class="header">
-        <div class="logo">🧬</div>
-        <div class="header-text">
-          <div class="title">NorthMedAI</div>
-          <div class="subtitle" data-i18n="subtitle"></div>
+    <div class="body">
+      <div class="status-card" id="status-card">
+        <div class="status-icon"><div class="status-dot"></div></div>
+        <div class="status-text">
+          <div class="status-title" id="status-title">…</div>
+          <div class="status-sub" id="status-sub">…</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="enabled-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="tiles">
+        <div class="tile false zero">
+          <div class="tile-label"><span class="tile-dot"></span> <span data-i18n="tile_false"></span></div>
+          <div class="tile-value" id="count-false">0</div>
+        </div>
+        <div class="tile disputed zero">
+          <div class="tile-label"><span class="tile-dot"></span> <span data-i18n="tile_disputed"></span></div>
+          <div class="tile-value" id="count-disputed">0</div>
+        </div>
+        <div class="tile sophism zero">
+          <div class="tile-label"><span class="tile-dot"></span> <span data-i18n="tile_sophism"></span></div>
+          <div class="tile-value" id="count-sophism">0</div>
         </div>
       </div>
 
-      <div class="body">
-        <!-- Карточка статуса с главным тумблером -->
-        <div class="status-card" id="status-card">
-          <div class="status-icon"><div class="dot"></div></div>
-          <div class="status-text">
-            <div class="status-title" id="status-title">…</div>
-            <div class="status-sub" id="status-sub">…</div>
+      <div class="toggles">
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label" data-i18n="toggle_ticks"></div>
           </div>
           <label class="switch">
-            <input type="checkbox" id="enabled-toggle" />
+            <input type="checkbox" id="ticks-toggle">
             <span class="slider"></span>
           </label>
         </div>
-
-        <!-- 3 плитки со статистикой -->
-        <div class="tiles">
-          <div class="tile false zero">
-            <div class="tile-label"><span class="dot"></span><span data-i18n="tile_false"></span></div>
-            <div class="tile-value" id="count-false">0</div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label"><span data-i18n="toggle_voice"></span> <span class="badge-soon" data-i18n="voice_soon"></span></div>
           </div>
-          <div class="tile disputed zero">
-            <div class="tile-label"><span class="dot"></span><span data-i18n="tile_disputed"></span></div>
-            <div class="tile-value" id="count-disputed">0</div>
-          </div>
-          <div class="tile sophism zero">
-            <div class="tile-label"><span class="dot"></span><span data-i18n="tile_sophism"></span></div>
-            <div class="tile-value" id="count-sophism">0</div>
-          </div>
+          <label class="switch">
+            <input type="checkbox" id="voice-toggle" disabled>
+            <span class="slider"></span>
+          </label>
         </div>
+      </div>
 
-        <!-- Pipeline: воронка прогресса агентов + время + версии -->
-        <details id="pipeline-card" class="pipeline-card" hidden>
-          <summary class="pipeline-summary">
-            <span class="pipeline-title">Pipeline</span>
-            <span class="pipeline-time" id="pipeline-time"></span>
-            <span class="pipeline-caret">▾</span>
-          </summary>
-          <div class="pipeline-body">
-            <div class="pipeline-funnel" id="pipeline-funnel">
-              <!-- этапы добавит popup.js -->
-            </div>
-            <div class="pipeline-versions" id="pipeline-versions">
-              <!-- бейджи версий агентов от popup.js -->
-            </div>
-          </div>
-        </details>
-
-        <!-- Тумблеры -->
-        <div class="toggles">
-          <div class="toggle-row">
-            <div class="label-block">
-              <div class="lbl" data-i18n="toggle_ticks"></div>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="ticks-toggle" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="toggle-row">
-            <div class="label-block">
-              <div class="lbl">
-                <span data-i18n="toggle_voice"></span>
-              </div>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="voice-toggle" />
-              <span class="slider"></span>
-            </label>
-          </div>
-        </div>
-
-        <!-- Кнопки -->
-        <div class="actions">
-          <button class="btn ghost" id="settings-btn">
-            <span>⚙</span><span data-i18n="btn_settings"></span>
-          </button>
-          <button class="btn primary" id="recheck-btn" data-i18n-title="btn_recheck_hint">
-            <span data-i18n="btn_recheck"></span>
-          </button>
-        </div>
+      <div class="actions">
+        <button class="btn btn-secondary" id="recheck-btn" data-i18n-title="btn_recheck_hint">
+          <span data-i18n="btn_recheck"></span>
+        </button>
       </div>
     </div>
-
-    <!-- ─── Settings view ──────────────────────────────────────────────── -->
-    <div class="settings-panel" id="settings-view">
-      <div class="settings-header">
-        <button class="back-btn" id="back-btn">‹</button>
-        <div class="settings-title" data-i18n="settings_title"></div>
-      </div>
-      <div class="settings-body">
-        <div class="field">
-          <label data-i18n="lang_label"></label>
-          <div class="lang-row">
-            <button class="lang-chip" data-lang="ru" data-i18n="lang_ru"></button>
-            <button class="lang-chip" data-lang="en" data-i18n="lang_en"></button>
-          </div>
-        </div>
-
-        <div class="field">
-          <label data-i18n="backend_label"></label>
-          <input class="text-input" id="backend-input" type="text" placeholder="http://localhost:8000" />
-          <div class="field-hint" data-i18n="backend_hint"></div>
-        </div>
-
-        <div class="field">
-          <label data-i18n="reset_label"></label>
-          <button class="btn ghost" id="reset-btn" data-i18n="reset_btn"></button>
-        </div>
-
-        <div class="about" data-i18n="about"></div>
-      </div>
-    </div>
-
   </div>
 
-  <script src="i18n.js"></script>
-  <script src="popup.js"></script>
+  <!-- Панель настроек (только язык и сброс) -->
+  <div class="settings-panel" id="settings-view">
+    <div class="settings-header">
+      <button class="back-btn" id="back-btn">←</button>
+      <div class="settings-title" data-i18n="settings_title"></div>
+    </div>
+    <div class="settings-body">
+      <div class="field">
+        <label data-i18n="lang_label"></label>
+        <div class="lang-row">
+          <button class="lang-chip" data-lang="ru" data-i18n="lang_ru"></button>
+          <button class="lang-chip" data-lang="en" data-i18n="lang_en"></button>
+        </div>
+      </div>
+      <div class="field">
+        <label data-i18n="reset_label"></label>
+        <button class="btn-secondary" id="reset-btn" style="width:100%" data-i18n="reset_btn"></button>
+      </div>
+      <div class="about" data-i18n="about"></div>
+    </div>
+  </div>
+</div>
+<script src="i18n.js"></script>
+<script src="popup.js"></script>
 </body>
 </html>
