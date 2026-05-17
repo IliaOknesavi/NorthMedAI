@@ -484,6 +484,76 @@
       }
       .nmai-btn.primary:hover { background: rgba(102,217,177,0.28); }
 
+      /* Индикатор «Алиса говорит» — появляется на время озвучки в
+         нижнем-левом углу плеера. Слева — SVG-иконка с пульсирующим
+         «глазком» (стилизация под Алису, не копия логотипа), справа —
+         анимированный эквалайзер из 4 столбиков и подпись. */
+      #nmai-alice {
+        position: absolute;
+        bottom: 64px;
+        left: 16px;
+        display: none;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px 10px 10px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, rgba(132,72,255,0.92) 0%, rgba(228,42,142,0.92) 100%);
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+        box-shadow: 0 8px 24px rgba(132,72,255,0.35), 0 2px 8px rgba(0,0,0,0.4);
+        z-index: 10001;
+        backdrop-filter: blur(8px);
+        animation: nmai-alice-glow 1.6s ease-in-out infinite;
+        transform: scale(var(--nmai-scale));
+        transform-origin: bottom left;
+      }
+      #nmai-alice.visible { display: inline-flex; }
+
+      #nmai-alice .nmai-alice-icon {
+        width: 28px;
+        height: 28px;
+        flex: 0 0 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #nmai-alice .nmai-alice-icon svg {
+        width: 100%;
+        height: 100%;
+        filter: drop-shadow(0 0 4px rgba(255,255,255,0.5));
+      }
+
+      /* Эквалайзер из 4 столбиков — анимация с разной фазой */
+      #nmai-alice .nmai-eq {
+        display: inline-flex;
+        align-items: flex-end;
+        gap: 3px;
+        height: 16px;
+        margin-left: 2px;
+      }
+      #nmai-alice .nmai-eq span {
+        width: 3px;
+        background: #fff;
+        border-radius: 2px;
+        animation: nmai-eq-bar 0.9s ease-in-out infinite;
+      }
+      #nmai-alice .nmai-eq span:nth-child(1) { animation-delay: -0.40s; }
+      #nmai-alice .nmai-eq span:nth-child(2) { animation-delay: -0.20s; }
+      #nmai-alice .nmai-eq span:nth-child(3) { animation-delay: -0.60s; }
+      #nmai-alice .nmai-eq span:nth-child(4) { animation-delay: -0.10s; }
+
+      @keyframes nmai-eq-bar {
+        0%, 100% { height: 30%; }
+        50%       { height: 100%; }
+      }
+      @keyframes nmai-alice-glow {
+        0%, 100% { box-shadow: 0 8px 24px rgba(132,72,255,0.35), 0 2px 8px rgba(0,0,0,0.4); }
+        50%      { box-shadow: 0 8px 28px rgba(228,42,142,0.55), 0 2px 12px rgba(0,0,0,0.45); }
+      }
+
       /* Тики на прогресс-баре */
       .nmai-tick {
         position: absolute;
@@ -647,6 +717,42 @@
   // Используется только когда tumblr nmai_voice включён в попапе.
   let speakingNow = false;
 
+  // SVG иконки Алисы — стилизованный логотип (треугольник со звуковыми
+  // волнами). НЕ копия настоящей айдентики Яндекса, но визуально на неё
+  // похож. Звуковые волны анимируются через CSS-keyframes.
+  const ALICE_SVG = `
+    <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="16" cy="16" r="14" fill="rgba(255,255,255,0.18)"/>
+      <path d="M16 7 L23 23 H9 Z" fill="#fff" opacity="0.95"/>
+      <circle cx="16" cy="17" r="2.3" fill="rgba(132,72,255,1)"/>
+    </svg>`;
+
+  function getAliceIndicator() {
+    let el = document.getElementById("nmai-alice");
+    if (el) return el;
+    const root = getOverlayRoot();
+    if (!root) return null;
+    el = document.createElement("div");
+    el.id = "nmai-alice";
+    el.innerHTML = `
+      <div class="nmai-alice-icon">${ALICE_SVG}</div>
+      <span>Алиса возражает</span>
+      <div class="nmai-eq"><span></span><span></span><span></span><span></span></div>
+    `;
+    root.appendChild(el);
+    return el;
+  }
+
+  function showAliceIndicator() {
+    const el = getAliceIndicator();
+    if (el) el.classList.add("visible");
+  }
+
+  function hideAliceIndicator() {
+    const el = document.getElementById("nmai-alice");
+    if (el) el.classList.remove("visible");
+  }
+
   async function speakExplanation(video, claim) {
     if (speakingNow) return;     // не накладываем озвучки друг на друга
     const text = (claim?.explanation || "").trim();
@@ -683,12 +789,14 @@
     const audio = new Audio(url);
     const cleanup = () => {
       try { URL.revokeObjectURL(url); } catch {}
+      hideAliceIndicator();
       speakingNow = false;
       if (wasPlaying) video.play().catch(() => {});
     };
     audio.addEventListener("ended", cleanup);
     audio.addEventListener("error", cleanup);
     try {
+      showAliceIndicator();
       await audio.play();
     } catch (e) {
       console.warn("[NMAI] tts: audio.play() упал", e);
@@ -925,6 +1033,7 @@
     document.getElementById("nmai-overlay")?.remove();
     document.getElementById("nmai-badge")?.remove();
     document.getElementById("nmai-tooltip")?.remove();
+    document.getElementById("nmai-alice")?.remove();
     document.querySelectorAll(".nmai-tick").forEach((el) => el.remove());
     activeClaim = null;
   }
